@@ -1,0 +1,9 @@
+{
+  "crons": [
+    { "path": "/api/cron/backup", "schedule": "0 3 * * 1" },
+    { "path": "/api/cron/expiring-posts", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/boost-expiry", "schedule": "30 9 * * *" },
+    { "path": "/api/cron/review-patterns", "schedule": "0 9 * * 1" },
+    { "path": "/api/cron/identity-retention", "schedule": "30 3 * * *" }
+  ]
+}

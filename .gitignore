@@ -1,43 +1,59 @@
-# dependencies
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# --- CRÍTICO: SEGURIDAD Y LLAVES ---
+# Ignoramos explícitamente todos los archivos que contienen credenciales de Supabase y Cloudinary
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# --- DEPENDENCIAS ---
 /node_modules
 /.pnp
 .pnp.*
 .yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# --- NEXT.JS / BUILD ---
 /.next/
 /out/
-
-# production
 /build
+*.tsbuildinfo
+next-env.d.ts
 
-# misc
+# --- TESTING ---
+/coverage
+
+# --- MISC / OS ---
 .DS_Store
 *.pem
+*.key
+*.lnk
+Thumbs.db
 
-# debug
+# --- SUPABASE CLI (local link state: project-ref, pooler URL) ---
+supabase/.temp/
+
+# --- LOGS / DEBUG ---
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (NUNCA commitear secretos)
-.env
-.env*.local
-.env.local
-.env.development.local
-.env.production.local
-
-# vercel
+# --- VERCEL ---
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# --- IDEs (Opcional pero recomendado) ---
+.vscode/
+.idea/
 
-# supabase
-supabase/.branches
-supabase/.temp
+# --- WORKSPACE PACKAGES BUILD OUTPUT ---
+packages/*/dist/
+
+# --- Claude Code harness worktrees ---
+.claude/worktrees/

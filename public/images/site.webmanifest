@@ -1,0 +1,11 @@
+{
+  "name": "Marketplace",
+  "short_name": "Marketplace",
+  "icons": [
+    { "src": "/icon", "sizes": "64x64", "type": "image/png", "purpose": "any" },
+    { "src": "/apple-icon", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ],
+  "theme_color": "#2563EB",
+  "background_color": "#FFFFFF",
+  "display": "standalone"
+}
