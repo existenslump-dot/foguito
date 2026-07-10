@@ -1,0 +1,55 @@
+{
+  "name": "@marketplace/payments-kit",
+  "version": "0.1.0",
+  "description": "Provider-agnostic payments kit: MercadoPago (Checkout Pro, Bricks card token, PIX) + NOWPayments (crypto) behind one createCheckout / handleWebhook / reconcile interface with verified, typed payment events.",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "author": "Kelflow (https://github.com/kelflow)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kelflow/marketplace-starter-base.git",
+    "directory": "packages/payments-kit"
+  },
+  "keywords": [
+    "payments",
+    "mercadopago",
+    "pix",
+    "nowpayments",
+    "crypto",
+    "latam",
+    "checkout",
+    "webhook",
+    "typescript"
+  ],
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md",
+    "LICENSE.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "demo": "node --experimental-strip-types demo/server.mjs",
+    "demo:webhook": "node demo/send-webhook.mjs"
+  },
+  "dependencies": {
+    "mercadopago": "^2.12.0"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

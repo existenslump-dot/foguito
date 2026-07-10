@@ -1,0 +1,77 @@
+name: CI
+
+# Run on every PR to main + every push to main. Vercel handles deploy; this
+# workflow only verifies the code builds, lints clean, and passes tests.
+#
+# Single job with ordered steps (lint → tsc → test) because `npm ci` dominates
+# wall-time on a small repo — splitting into parallel jobs would triple the
+# install cost. If test duration grows past ~2 minutes we can split it off.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel in-flight runs when a newer commit lands on the same ref. Keeps
+# the queue short on rapid push bursts (common during Sprint cleanup).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Hard cap — CI should never block PR reviews past this.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 LTS — matches Vercel's current default runtime and
+          # what local dev uses. Bump together with Vercel project setting
+          # if upgrading.
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        # `npm install` (not `npm ci`) matches what Vercel's build pipeline
+        # uses and tolerates the lock-file drift that shows up when Next's
+        # transitive deps bump a patch between the local regen and CI.
+        # We lose the strict lock-match guarantee but the tradeoff is
+        # worth it for a solo-dev project — caching via setup-node still
+        # keeps install time under ~30s.
+        run: npm install --no-audit --no-fund --prefer-offline
+
+      - name: Lint
+        # Post-Sprint 4 baseline is 0 errors; this step fails if a new
+        # rule breaks. Warnings are allowed — the eslint config doesn't
+        # --max-warnings=0 yet (would require cleaning 31 preexisting).
+        run: npm run lint
+
+      - name: TypeScript
+        # --noEmit skips file output — we only want type errors. Runs BEFORE
+        # the kit build on purpose: the app resolves the kit from its TS
+        # source, and typechecking dist-less mirrors a fresh clone (the
+        # scenario where dist-based resolution silently broke before).
+        run: npx tsc --noEmit
+
+      - name: Test
+        # Vitest `run` mode (CI-safe; no watch, no TTY). Full suite,
+        # dist-less like the tsc step.
+        run: npm test -- --run
+
+      - name: Next build
+        # Full production build, env-less (clients are lazy/guarded). This is
+        # what Vercel runs — catches bundler-level breaks that tsc/vitest
+        # can't (e.g. package exports that don't resolve under Turbopack).
+        run: npx next build
+
+      - name: Payments kit — isolated build
+        # Proves @marketplace/payments-kit compiles standalone (own tsconfig).
+        # Nothing resolves through dist anymore, so this runs LAST as a pure
+        # standalone-compile check for the kit.
+        run: npm run build:kit
