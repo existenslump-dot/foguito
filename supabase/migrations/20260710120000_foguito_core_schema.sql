@@ -16,7 +16,7 @@
 -- campos privilegiados; el resto se coacciona a OLD). auth.role() = claim del JWT.
 -- ──────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.is_service_role()
-RETURNS boolean LANGUAGE sql STABLE AS $$
+RETURNS boolean LANGUAGE sql STABLE SET search_path = public AS $$
   SELECT coalesce(auth.role(), '') = 'service_role';
 $$;
 REVOKE ALL ON FUNCTION public.is_service_role() FROM public;
@@ -251,7 +251,7 @@ CREATE TRIGGER content_publish_guard_trg
 -- admin o service-role (Didit/screening). Para el resto se coaccionan a OLD.
 -- ══════════════════════════════════════════════════════════════════════════
 CREATE OR REPLACE FUNCTION public.creators_guard_privileged()
-RETURNS trigger LANGUAGE plpgsql AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   IF public.is_admin() OR public.is_service_role() THEN
     RETURN NEW;
@@ -284,7 +284,7 @@ CREATE TRIGGER creators_guard_privileged_trg
 -- admin/service-role. El resto de campos sí los edita quien lo cargó.
 -- ══════════════════════════════════════════════════════════════════════════
 CREATE OR REPLACE FUNCTION public.performers_2257_guard()
-RETURNS trigger LANGUAGE plpgsql AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   IF public.is_admin() OR public.is_service_role() THEN
     RETURN NEW;
@@ -310,7 +310,7 @@ CREATE TRIGGER performers_2257_guard_trg
 -- (un ledger doble-entrada no se edita: se compensa con un asiento nuevo).
 -- ══════════════════════════════════════════════════════════════════════════
 CREATE OR REPLACE FUNCTION public.credit_ledger_immutable()
-RETURNS trigger LANGUAGE plpgsql AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   RAISE EXCEPTION 'credit_ledger es append-only: % no permitido', TG_OP
     USING ERRCODE = 'check_violation';
@@ -465,3 +465,14 @@ CREATE POLICY agegate_select ON age_gate_verifications FOR SELECT TO authenticat
 DROP POLICY IF EXISTS agegate_insert ON age_gate_verifications;
 CREATE POLICY agegate_insert ON age_gate_verifications FOR INSERT TO authenticated
   WITH CHECK (user_id = auth.uid() OR public.is_admin());
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Hardening · las funciones de trigger NO deben ser invocables por RPC
+-- (PostgREST expone toda función public). Un trigger las corre sin chequear
+-- EXECUTE, así que revocar no rompe el gate y cierra la superficie RPC.
+-- ══════════════════════════════════════════════════════════════════════════
+REVOKE ALL ON FUNCTION public.content_publish_guard()      FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.payouts_guard()              FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.creators_guard_privileged()  FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.performers_2257_guard()      FROM public, anon, authenticated;
+REVOKE ALL ON FUNCTION public.credit_ledger_immutable()    FROM public, anon, authenticated;
