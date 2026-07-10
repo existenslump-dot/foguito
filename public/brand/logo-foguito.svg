@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 125" width="100" height="125" role="img" aria-label="Foguito">
+  <!-- Foguito · primario (núcleo = ojo, pupila wine). Logo detallado para hero/lockup/full color. -->
+  <defs>
+    <linearGradient id="fg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFC24C"/>
+      <stop offset=".55" stop-color="#FF5330"/>
+      <stop offset="1" stop-color="#FF2E7E"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF3E9"/>
+      <stop offset="1" stop-color="#FFB338"/>
+    </linearGradient>
+  </defs>
+  <path d="M50 6 C 60 30, 88 44, 88 78 A 38 42 0 1 1 12 78 C 12 44, 40 30, 50 6 Z" fill="url(#fg)"/>
+  <path d="M50 40 C 56 54, 70 60, 70 78 A 20 22 0 1 1 30 78 C 30 62, 44 56, 50 40 Z" fill="url(#core)"/>
+  <ellipse cx="50" cy="80" rx="11" ry="8" fill="#3A0E26"/>
+</svg>
