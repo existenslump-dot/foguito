@@ -1,8 +1,8 @@
 # Foguito — Manifiesto de assets a cargar
 
-Nombres y rutas exactas de los archivos a subir en `public/`. Convención tomada de
-Velora+ (`public/images/*`) para que el porte de `next.config.ts` / `site.webmanifest` /
-`<Head>` sea 1:1.
+Nombres y rutas exactas de los archivos a subir en `public/`. Convención del engine
+`marketplace-starter` (`public/images/*`) para que el porte de `next.config.ts` /
+`site.webmanifest` / `<Head>` sea 1:1.
 
 **Estado:** `✅ incluido` = ya está en el repo (SVG master generado desde el design system).
 `⬆️ subir` = lo tenés que generar/exportar y subir. `♻️ velora` = existe en Velora+, se
@@ -64,7 +64,7 @@ public/fonts/dm-sans/dm-sans-{400,500,700}.woff2
 public/fonts/dm-mono/dm-mono-{400,500}.woff2
 ```
 
-## 6. Iconografía funcional (♻️ re-brandear de Velora+)
+## 6. Iconografía funcional (♻️ re-brandear del engine)
 
 | Ruta | Nota |
 |------|------|

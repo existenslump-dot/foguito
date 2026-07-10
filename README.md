@@ -5,10 +5,11 @@ ecosistema **NihilVision**. La plataforma **le paga a las creadoras** un revenue
 el merchant of record: el fan compra un servicio a la plataforma, nunca le paga directo a la
 creadora. Cara pop de fuego adelante; verificación 18+, 2257, CSAM y AML invisibles atrás.
 
-> **Estado:** bootstrap / planificación. Este repo arranca **clonando Velora+** como base de
-> infraestructura (auth, KYC, moderación, 2FA, auditoría, backups, CSP) y le agrega la capa de
-> plataforma-de-contenido-con-pago (entitlements, ledger, entrega firmada, age-gate real,
-> 2257, CSAM, riel de pagos MoR + payout).
+> **Estado:** bootstrap / planificación. Este repo arranca **derivando el engine
+> `marketplace-starter`** (config-driven; ya trae auth, **KYC Didit**, moderación, 2FA,
+> auditoría, backups, CSP, watermark, payments-kit swappable) y le agrega la capa de
+> plataforma-de-contenido-con-pago (entitlements, ledger doble entrada, entrega firmada,
+> age-gate real, 2257, CSAM, riel de pagos MoR + payout). Ver `docs/PLAN-DE-TRABAJO.md` → *Base*.
 
 ## Documentos
 

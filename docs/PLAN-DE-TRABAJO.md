@@ -1,9 +1,35 @@
 # Foguito · Plan de trabajo
 
 > Documento operativo. Traduce los tres briefs (INSTRUCCIONES-GENERALES, design-system,
-> estructura-riel) a un plan de construcción ejecutable, partiendo de **clonar Velora+**.
-> Regla base heredada: **si algo acá contradice los pilares §2 de INSTRUCCIONES-GENERALES,
-> ganan los pilares.** Seguridad de menores es bloqueante absoluto (requisito #0).
+> estructura-riel) a un plan de construcción ejecutable, partiendo de **clonar el engine
+> `marketplace-starter`** (ver §Base). Regla base heredada: **si algo acá contradice los
+> pilares §2 de INSTRUCCIONES-GENERALES, ganan los pilares.** Seguridad de menores es
+> bloqueante absoluto (requisito #0).
+
+## Base: `marketplace-starter`, no Velora+
+
+**Decisión (2026-07-10):** la base es **`existenslump-dot/marketplace-starter`**, el engine
+config-driven multi-vertical del que Velora+ es un producto derivado. Es mejor punto de
+partida que Velora+ porque:
+
+- **Es el motor limpio, no un producto lleno de cruft.** Branding, país/moneda/locale, taxonomía
+  y features salen de `src/config/marketplace.config.ts` + env → **rebrand = editar config**, no
+  cirugía find/replace. No hay que stripear nada AR/escort (Velora sí).
+- **Didit KYC ya está implementado** en el engine (`src/lib/didit/*` + `/api/verification/
+  didit-session` + `src/lib/kyc/` pluggable). El PR-1 arranca ~80% hecho.
+- **Feature flags** (`FEATURE_KYC/PAYMENTS/CREDITS/STORIES/REVIEWS/GEO_BLOCK`): prendés lo que
+  querés (KYC on, credits on), apagás lo que no (stories/reviews/blog).
+- **Pagos como paquete swappable** (`packages/payments-kit`, provider `mercadopago|stripe|none`)
+  → seam limpio para enchufar el riel MoR + payout de foguito sin arrancar de cero.
+- **Watermark de Cloudinary** ya cableado (`NEXT_PUBLIC_CLOUDINARY_WATERMARK_ID`) — insumo del PR-5.
+- **Baseline de migraciones limpio** (14, genéricas) vs. el squash escort de Velora.
+
+⚠️ **Caveat:** `marketplace-starter` es el **superset / source-of-truth de un producto vendible
+(Kelflow)**, con tooling de derive (`tooling/split/derive.mjs`) y docs internas seller-only
+(secciones `DERIVE_OMIT`, refs a `KELFLOW-*`). Al basar foguito en él hay que **NO arrastrar la
+capa seller**: correr el derive para emitir una base limpia, o quitar `tooling/split/`, las
+secciones `DERIVE_OMIT` y las refs internas. El derive existe justo para esto (borra docs
+internas y falla-cerrado ante leaks de identidad).
 
 ---
 
@@ -14,23 +40,25 @@ las creadoras** (revenue-share). Es la única superficie del ecosistema con **pa
 terceros** → la de mayor exposición regulatoria. La cara es pop y de fuego; atrás corre
 verificación 18+, 2257, CSAM y AML de primer nivel.
 
-**Velora+ es un excelente punto de partida** porque ya resuelve ~40% de la infra pesada
-(auth sin SDK, KYC en storage privado con RLS, moderación admin, 2FA, auditoría,
-rate-limit, backups cifrados, CSP/headers). Lo que **no** tiene y hay que construir es todo
-lo de plataforma-de-contenido-con-pago: entitlements, ledger de créditos, entrega firmada,
-age-gate real, 2257, CSAM y el riel de pagos MoR + payout.
+**El engine `marketplace-starter` resuelve ~50% de la infra pesada** (auth sin SDK, KYC Didit,
+storage privado con RLS, moderación admin, 2FA, auditoría, rate-limit, backups, CSP/headers,
+geo, i18n, watermark, payments-kit swappable). Lo que **no** tiene y hay que construir es todo
+lo de plataforma-de-contenido-con-pago: entitlements/paywall, ledger de créditos doble entrada,
+entrega firmada, age-gate real del consumidor, 2257, CSAM y el riel de pagos MoR + payout.
 
 ---
 
-## 1. Punto de partida — qué se reusa de Velora+ y qué es nuevo
+## 1. Punto de partida — qué trae el engine y qué es nuevo
 
-### ♻️ Se REUSA casi tal cual (portar + re-brandear)
+### ♻️ Ya viene en el engine (config + rebrand, casi cero código)
 
-| Subsistema Velora+ | Archivos clave | Para qué sirve en Foguito |
+| Subsistema del engine | Archivos clave | Para qué sirve en Foguito |
 |---|---|---|
-| **Auth sin SDK** (dodge del lock-hang) | `src/lib/supabase/direct.ts`, `client.ts`, `middleware.ts` | login email + Google OAuth idéntico |
-| **2FA TOTP admin** | `src/lib/totp*.ts`, `/auth/totp`, `/api/auth/totp/*` | gate de admin/moderación |
-| **KYC / identidad en bucket privado** | `identity-documents` bucket + RLS, `/api/admin/identity-{doc,upload}`, `src/components/verify/` | base para verificación de creadora (se le enchufa Didit) |
+| **Auth sin SDK** (dodge del lock-hang) | `src/lib/supabase/direct.ts`, `client.ts`, `middleware.ts` | login email + OAuth |
+| **KYC Didit (¡ya implementado!)** | `src/lib/didit/*`, `src/lib/kyc/*`, `/api/verification/didit-session`, `/api/admin/verification` | verificación 18+ de creadora — PR-1 arranca ~80% hecho |
+| **2FA TOTP admin** | `src/lib/totp*.ts`, `/api/auth/totp/*` | gate de admin/moderación |
+| **Identidad en bucket privado** | `identity-documents` bucket + RLS, `/api/admin/identity-{doc,upload}` | docs KYC/2257 cifrados (`DIDIT_PAYLOAD_KEY`) |
+| **Retención de PII** | `/api/cron/identity-retention`, `IDENTITY_RETENTION_DAYS` | minimización de datos (age-gate/KYC) |
 | **Moderación admin + guard DB** | `/admin`, `/api/admin/approve-post`, trigger `posts_guard_moderation` | cola pre-publicación de contenido |
 | **Auditoría rica** | `src/lib/audit.ts` (`recordAudit`), tabla `audit_log` | audit trail inmutable (2257, takedown, payout) |
 | **Rate-limit** | `src/lib/rateLimit.ts` (Upstash + fallback) | anti-abuso en upload/pago/API |
@@ -39,8 +67,11 @@ age-gate real, 2257, CSAM y el riel de pagos MoR + payout.
 | **Backups + DR cifrado** | `src/lib/backup/**`, crons, off-site Drive AES-GCM | mismo sistema, agregar tablas nuevas al manifest |
 | **Geo** | `src/lib/geo.ts` | base del age-gate por jurisdicción del viewer |
 | **Tiers** | `src/lib/tiers.ts`, `tier-settings.ts` | mapea a temperatura (Tibio→A todo fuego) |
-| **CSP / headers / robots / security.txt** | `next.config.ts`, `middleware.ts`, `/api/monitoring/csp` | hardening desde el día 1 (ajustar `SELF_ORIGIN` a foguito.com) |
-| **Build config** | `next.config.ts` (React Compiler), `vitest`, eslint, tsconfig, `components.json` (shadcn) | arranca compilando y testeando |
+| **CSP / headers / robots / security.txt** | `next.config.ts`, `middleware.ts` | hardening día 1 (ajustar dominio a foguito.com) |
+| **Branding config-driven** | `src/config/marketplace.config.ts` (`brand.colors` → `--brand-*` → `--v-*`) | **rebrand = editar config**, no find/replace |
+| **Payments-kit swappable** | `packages/payments-kit` (provider `mercadopago\|stripe\|none`) | seam para enchufar el riel MoR + payout |
+| **Media + watermark** | Cloudinary, `NEXT_PUBLIC_CLOUDINARY_WATERMARK_ID` | insumo del PR-5 (entrega firmada) |
+| **Build config** | `next.config.ts` (React Compiler), `vitest`, eslint, tsconfig, `components.json` | arranca compilando y testeando |
 
 ### 🆕 Se CONSTRUYE nuevo (no existe en Velora+)
 
@@ -57,31 +88,36 @@ age-gate real, 2257, CSAM y el riel de pagos MoR + payout.
 | **AML / sanciones / PEP** en las tres superficies | inexistente | PR-8/10 |
 | **Didit** como proveedor de KYC | Velora hace KYC manual por admin | PR-1 |
 
-### 🔻 Se DESCARTA de Velora+ (no aplica)
+### 🔻 Se APAGA / no se deriva del engine (no aplica)
 
-Directorio por ciudad/SEO de escorts, MercadoPago AR, `blog`, `stories`, `musa`, categorías
-de escort, `promo`/`boost`, reviews de avisos, vanity slugs de aviso. Se saca en el strip
-inicial (PR-0) para no arrastrar superficie muerta.
+`blog`/Foro, `stories`, `reviews` de listings, el `payments-kit` MercadoPago: **se apagan por
+flag o no se derivan** (`FEATURE_*=false`). Sin strip manual — el engine ya los tiene gateados.
+El producto listings/city-feed se reemplaza por el de creadoras+contenido (PRs 5/6).
 
 ---
 
-## 2. Estrategia de bootstrap — "clonar Velora+ y adaptar"
+## 2. Estrategia de bootstrap — "derivar el engine y configurar"
 
-Camino recomendado (más rápido que greenfield: conserva auth, RLS, build y CSP probados):
+Camino recomendado (mucho más rápido que Velora+: no hay strip, el rebrand es config):
 
-1. **Copiar el árbol de Velora+** a `foguito` (sin `.git`, sin `node_modules`, sin `docs`
-   específicos de SEO/AR).
-2. **Rebrand de tokens**: reemplazar Noir&Gold (`#080808`/`#C5A059`) por el sistema de fuego
-   (`docs/BRAND.md`), fuentes Cormorant/Montserrat → Unbounded/Space Grotesk/DM Sans/DM Mono.
-3. **Strip**: borrar rutas/lib de §1.🔻 (directorio, blog, stories, musa, MP).
-4. **Renombrar dominio**: `SELF_ORIGIN`, CSP, `robots`, `security.txt`, emails → `foguito.com`.
-5. **Supabase nuevo proyecto**: no reusar el de Velora (datos y RLS distintos). Migraciones
-   nuevas desde cero (el baseline de Velora es de escorts) — ver §4.
+1. **Emitir una base limpia del engine.** Correr `node tooling/split/derive.mjs` en
+   `marketplace-starter` para obtener `out/base` **con el KYC add-on** (Didit) — o copiar el
+   superset y quitar la capa seller (`tooling/split/`, secciones `DERIVE_OMIT`, refs `KELFLOW-*`).
+   Copiar ese árbol limpio a `foguito`.
+2. **Rebrand por config**: editar `src/config/marketplace.config.ts` → `brand.colors`
+   (`primary` ember `#FF5330`, `dark` night `#17101A`, `light` `#FFF6EF`) + `name: 'Foguito'`;
+   fuentes → Unbounded/Space Grotesk/DM Sans/DM Mono (ver `docs/BRAND.md`).
+3. **Flags**: `FEATURE_KYC=true`, `KYC_PROVIDER=didit`, `FEATURE_CREDITS=true`;
+   `FEATURE_STORIES/REVIEWS/BLOG=false`, `FEATURE_PAYMENTS=false` (foguito trae su riel MoR).
+4. **Mercado/dominio**: `MARKET_COUNTRY=BR,CL,AR`, `NEXT_PUBLIC_SITE_DOMAIN=foguito.com`, CSP/
+   `robots`/`security.txt`/emails → foguito.com.
+5. **Supabase nuevo proyecto** (no reusar el del engine). Aplicar las 14 migraciones baseline
+   del engine + las nuevas del §4 (creators/content/2257/entitlements/ledger/payouts/age-gate).
 6. A partir de ahí, los PRs 0→10 agregan lo nuevo. `1 PR = 1 rama = 1 review`.
 
-> Alternativa (selective port): arrancar Next.js limpio y **lift** solo los subsistemas de
-> §1.♻️. Más limpio, más lento. Recomiendo clonar-y-adaptar por velocidad; el strip de §1.🔻
-> deja el árbol chico igual.
+> El engine es un producto de *listings/directory*; foguito es *suscripción de contenido*. El
+> **infra** se reusa casi entero; el **producto** (creadoras + paywall + entitlements + ledger +
+> payout) es fork, no config. Por eso foguito **forkea** el engine (no es solo otra config suya).
 
 ---
 
@@ -126,8 +162,8 @@ Modelo sugerido por rol (de INSTRUCCIONES §10).
 
 | PR | Qué | Reusa de Velora+ | Nuevo | ● | Modelo |
 |:--:|-----|---|---|:--:|---|
-| **0** | Fundaciones: clonar+strip+rebrand; esquema que impide contenido sin verificación; RLS; age-gate skeleton | build, auth, CSP, RLS patterns | tablas §4, triggers gate | ● | Opus (review) + Code |
-| **1** | Verificación edad/identidad de creadora (18+) con **Didit** | KYC bucket, `/verify`, admin | integración Didit + hooks re-verify | ● | Opus |
+| **0** | Fundaciones: derivar engine + rebrand config + flags; esquema que impide contenido sin verificación; RLS; age-gate skeleton | build, auth, CSP, RLS, config-driven brand | tablas §4, triggers gate | ● | Opus (review) + Code |
+| **1** | Verificación edad/identidad de creadora (18+) con **Didit** | **Didit ya implementado** (`src/lib/didit/*`, `/api/verification/didit-session`) | activar KYC_PROVIDER=didit + hooks re-verify + gate de publicación | ● | Opus |
 | **2** | **2257** + vínculo con contenido | audit, storage privado cifrado | `performers_2257`, gate de publicación | ● | Opus |
 | **3** | Moderación + **detección de CSAM** (núcleo) | cola admin, `posts_guard_moderation` | vendor hash-matching + clasificador + reporte NCMEC | ● | **Opus (review obligatorio)** + Sonnet |
 | **4** | Age-gate del consumidor por jurisdicción | `geo.ts`, `aviso-adultos` | verificación real (no checkbox), BR ECA Digital | ● | Sonnet |
@@ -142,8 +178,9 @@ Modelo sugerido por rol (de INSTRUCCIONES §10).
 
 **PR-0** — `content` no puede pasar a `published` sin `creator.kyc_status=verified`; RLS niega
 lectura de contenido pagado sin entitlement; age-gate skeleton bloquea el árbol. Test que lo prueba.
-**PR-1** — Didit devuelve 18+ verificado antes de habilitar onboarding; falla de verificación
-→ sin publicación. Re-verificación disparable.
+**PR-1** — el engine ya trae la integración Didit; foguito la **activa** (`KYC_PROVIDER=didit`
++ credenciales) y la hace **bloqueante**: Didit devuelve 18+ verificado antes de habilitar
+onboarding; falla → sin publicación. Re-verificación disparable.
 **PR-2** — contenido con ≥1 performer sin registro 2257 completo = **no publicable** (probado).
 **PR-3** — todo upload pasa hash-matching **antes** de hacerse visible; hit → bloqueo duro +
 preservación de evidencia + reporte automático a NCMEC; señal "posible menor" → mismo flujo.
@@ -163,7 +200,7 @@ fuera del código/CSP; PII scrubbed.
 
 | Servicio | Para | Bloquea |
 |---|---|---|
-| **Didit** | KYC creadora 18+ + edad + PEP/sanciones | PR-1, PR-4 |
+| **Didit** (cuenta) | KYC creadora 18+ — **integración ya en el engine**, falta la cuenta/credenciales (free tier 500/mes) | PR-1, PR-4 |
 | **CSAM vendor** (Thorn Safer / PhotoDNA / IWF) | hash-matching pre-publicación | **PR-3 (contratar ANTES)** |
 | **NCMEC CyberTipline** (alta de reporter) | reporte obligatorio | PR-3 |
 | **Acquirer high-risk** (CCBill / Segpay / Epoch / Verotel) | pagos inbound MoR | PR-7 |
