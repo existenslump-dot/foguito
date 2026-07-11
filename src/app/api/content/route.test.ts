@@ -8,8 +8,9 @@
  *     performer, and returns { id, media_ref }
  *   - INVARIANTE: the route is the only writer — the client never inserts
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 import { NextResponse } from 'next/server'
+import sharp from 'sharp'
 
 let currentUser: string | null = 'creator-1'
 vi.mock('@/lib/clients/require-user', () => ({
@@ -57,8 +58,22 @@ vi.mock('@/lib/audit', () => ({ recordAudit: vi.fn(() => Promise.resolve()) }))
 
 import { POST } from './route'
 
-function jpg(size = 10): File {
-  return new File([new Uint8Array(size)], 'foto.jpg', { type: 'image/jpeg' })
+// El alta ahora sniffea magic-bytes + valida decodificabilidad con sharp, así que
+// los tests necesitan bytes de imagen REALES (un buffer de ceros ya no pasa).
+let realJpeg: Uint8Array<ArrayBuffer>
+beforeAll(async () => {
+  const buf = await sharp({
+    create: { width: 8, height: 8, channels: 3, background: { r: 20, g: 20, b: 20 } },
+  })
+    .jpeg()
+    .toBuffer()
+  const copy = new Uint8Array(buf.length)
+  copy.set(buf)
+  realJpeg = copy
+})
+
+function jpg(): File {
+  return new File([realJpeg], 'foto.jpg', { type: 'image/jpeg' })
 }
 
 function makeReq(fields: Record<string, string>, file?: File | null) {
@@ -112,6 +127,26 @@ describe('POST /api/content', () => {
   it('400 on a disallowed media mime', async () => {
     const bad = new File([new Uint8Array(4)], 'x.svg', { type: 'image/svg+xml' })
     const res = await POST(makeReq({ visibility: 'free_preview' }, bad))
+    expect(res.status).toBe(400)
+    expect(uploadSpy).not.toHaveBeenCalled()
+  })
+
+  it('400 when the declared type does not match the actual bytes (watermark-strip bypass blocked)', async () => {
+    // Bytes de imagen REAL declarados como video/mp4: sin el sniff se guardaría
+    // media_type='video' y se serviría sin marca de agua. El sniff lo rechaza.
+    const mislabeled = new File([realJpeg], 'clip.mp4', { type: 'video/mp4' })
+    const res = await POST(makeReq({ visibility: 'free_preview' }, mislabeled))
+    expect(res.status).toBe(400)
+    expect(uploadSpy).not.toHaveBeenCalled()
+  })
+
+  it('400 when the bytes carry an image signature but sharp cannot decode them', async () => {
+    // FF D8 FF (firma JPEG) pero no es un JPEG válido → sniff 'image' matchea, pero
+    // sharp.metadata() tira → se rechaza en el alta (evita el 404 eterno en entrega).
+    const corrupt = new File([new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x11, 0x22])], 'foto.jpg', {
+      type: 'image/jpeg',
+    })
+    const res = await POST(makeReq({ visibility: 'free_preview' }, corrupt))
     expect(res.status).toBe(400)
     expect(uploadSpy).not.toHaveBeenCalled()
   })

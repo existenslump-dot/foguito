@@ -8,7 +8,10 @@ import {
   listContentForCreator,
   listContentForModeration,
   getContentForReview,
+  getContentForDelivery,
 } from './content'
+
+const VALID_UUID = '11111111-1111-1111-1111-111111111111'
 
 type Call = { table: string; op: string; payload: unknown }
 
@@ -240,5 +243,65 @@ describe('content · getContentForReview', () => {
     const r = await getContentForReview(client, 'c-8')
     expect(r!.media_blocked).toBe(false)
     expect(r!.media_url).toBe('https://signed/media-8')
+  })
+})
+
+describe('content · getContentForDelivery', () => {
+  const eligibleRow = {
+    id: VALID_UUID, creator_id: 'u1', title: 't', caption: null, media_type: 'image',
+    visibility: 'free_preview', required_tier: null, ppv_price_credits: null,
+    status: 'published', csam_status: 'pass', published_at: '2026-07-11T00:00:00Z',
+    created_at: '2026-07-11T00:00:00Z', media_ref: 'u1/abc/media.jpg',
+  }
+
+  it('returns null on an invalid (non-UUID) id WITHOUT hitting the client', async () => {
+    const { client, calls } = buildFake({ selectData: eligibleRow })
+    // fanClient and admin are the same fake here (admin is unused by the fn)
+    expect(await getContentForDelivery(client, client, 'not-a-uuid')).toBeNull()
+    expect(calls.length).toBe(0)
+  })
+
+  it('returns null when the fan RLS client yields no row (not-entitled ≡ not-found)', async () => {
+    const { client } = buildFake({ selectData: null })
+    expect(await getContentForDelivery(client, client, VALID_UUID)).toBeNull()
+  })
+
+  it('returns null on a select error (fail-closed)', async () => {
+    const { client } = buildFake({ selectData: null, selectError: { message: 'boom' } })
+    expect(await getContentForDelivery(client, client, VALID_UUID)).toBeNull()
+  })
+
+  it('double-guard: null when status!==published even if a row comes back', async () => {
+    const { client } = buildFake({ selectData: { ...eligibleRow, status: 'in_review' } })
+    expect(await getContentForDelivery(client, client, VALID_UUID)).toBeNull()
+  })
+
+  it('double-guard: null when csam_status!==pass even if a row comes back', async () => {
+    const { client } = buildFake({ selectData: { ...eligibleRow, csam_status: 'pending' } })
+    expect(await getContentForDelivery(client, client, VALID_UUID)).toBeNull()
+  })
+
+  it('PILAR #0: null for a blocked hit that somehow returns a row', async () => {
+    const { client } = buildFake({
+      selectData: { ...eligibleRow, status: 'removed', csam_status: 'blocked' },
+    })
+    expect(await getContentForDelivery(client, client, VALID_UUID)).toBeNull()
+  })
+
+  it('null when media_ref is missing', async () => {
+    const { client } = buildFake({ selectData: { ...eligibleRow, media_ref: null } })
+    expect(await getContentForDelivery(client, client, VALID_UUID)).toBeNull()
+  })
+
+  it('returns the internal object (WITH media_ref) when eligible', async () => {
+    const { client } = buildFake({ selectData: eligibleRow })
+    const r = await getContentForDelivery(client, client, VALID_UUID)
+    expect(r).toEqual({
+      id: VALID_UUID,
+      creator_id: 'u1',
+      media_ref: 'u1/abc/media.jpg',
+      media_type: 'image',
+      visibility: 'free_preview',
+    })
   })
 })

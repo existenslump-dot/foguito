@@ -51,6 +51,24 @@ export default async function PublicProfilePage({
     .eq('is_approved', true)
     .order('created_at', { ascending: false })
 
+  // Contenido de creadora (paywall). El MISMO cliente cookie-scoped → la RLS
+  // `content_select` filtra a lo que ESTE viewer puede ver: free_preview + lo
+  // que tenga desbloqueado (entitlement/suscripción). Las piezas gateadas que el
+  // fan NO desbloqueó simplemente NO vuelven de la query (RLS las oculta), así
+  // que acá sólo se listan las visibles — nunca teasers bloqueados.
+  //
+  // NOTA (PR-6): mostrar "teasers" con título/precio de contenido AÚN bloqueado
+  // (para invitar a desbloquear) necesita una proyección teaser-safe aparte
+  // (metadata sin media, expuesta por una vista/policy propia). Es materia del
+  // PR de granting/entitlements — NO inventamos una tabla de teasers acá.
+  const { data: content } = await supabase
+    .from('content')
+    .select('id, title, caption, media_type, visibility, required_tier, ppv_price_credits, created_at')
+    .eq('creator_id', profile.id)
+    .eq('status', 'published')
+    .eq('csam_status', 'pass')
+    .order('created_at', { ascending: false })
+
   const avatarRaw = posts?.[0]?.image_urls?.[0] || null
   const avatar    = avatarRaw ? getWatermarkedImageUrl(avatarRaw) : null
   const cities = [...new Set(
@@ -225,6 +243,81 @@ export default async function PublicProfilePage({
                 )
               })}
             </div>
+          )}
+
+          {content && content.length > 0 && (
+            <section style={{ marginTop: '48px' }}>
+              <h2 className="pf-fade" style={{
+                fontFamily: "'Switzer','Inter','Helvetica Neue',Arial,sans-serif",
+                fontSize: '9px', fontWeight: 400, letterSpacing: '.24em',
+                textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)',
+                marginBottom: '16px', animationDelay: '.35s',
+              }}>
+                Contenido
+              </h2>
+
+              <div className="pf-fade" style={{
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                gap: '12px', animationDelay: '.4s',
+              }}>
+                {content.map((c) => {
+                  // El binario se entrega SIEMPRE por el endpoint gateado (auth +
+                  // age-gate + entitlement + marca de agua). Nunca se referencia
+                  // el bucket privado ni una URL firmada cruda desde el cliente.
+                  const mediaUrl = `/api/content/${c.id}/media`
+                  const priceNote =
+                    c.visibility === 'ppv' && c.ppv_price_credits
+                      ? `${c.ppv_price_credits} foguitos`
+                      : c.visibility === 'tier' && c.required_tier
+                        ? c.required_tier
+                        : 'preview'
+                  return (
+                    <div key={c.id} className="pf-card" style={{ overflow: 'hidden' }}>
+                      <div style={{ aspectRatio: '3/4', background: 'var(--v-bg-card)', position: 'relative' }}>
+                        {c.media_type === 'video' ? (
+                          <video
+                            controls
+                            preload="metadata"
+                            src={mediaUrl}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : c.media_type === 'audio' ? (
+                          <div style={{
+                            width: '100%', height: '100%', display: 'flex',
+                            alignItems: 'center', justifyContent: 'center', padding: '12px',
+                          }}>
+                            <audio controls preload="metadata" src={mediaUrl} style={{ width: '100%' }} />
+                          </div>
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={mediaUrl}
+                            alt={c.title ?? 'Contenido'}
+                            loading="lazy"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        )}
+                      </div>
+                      <div style={{ padding: '10px 12px' }}>
+                        <p style={{
+                          fontFamily: "'Switzer','Inter','Helvetica Neue',Arial,sans-serif",
+                          fontSize: '13px', fontWeight: 400, color: '#FFFFFF', marginBottom: '4px',
+                        }}>
+                          {c.title || 'Contenido'}
+                        </p>
+                        <p style={{
+                          fontFamily: "'Switzer','Inter','Helvetica Neue',Arial,sans-serif",
+                          fontSize: '8px', fontWeight: 400, letterSpacing: '.14em',
+                          textTransform: 'uppercase', color: 'var(--v-accent)',
+                        }}>
+                          {priceNote}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
           )}
 
           <footer style={{ marginTop: '64px', textAlign: 'center' }}>

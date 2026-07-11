@@ -10,14 +10,21 @@ import {
   type MediaType,
   type Visibility,
 } from '@/lib/content'
+import sharp from 'sharp'
 import { ALLOWED_IMAGE_MIME, ALLOWED_VIDEO_MIME } from '@/lib/upload-validation'
 import { MAX_IMAGE_SIZE, MAX_STORY_VIDEO_SIZE } from '@/lib/media-limits'
 import { TIERS } from '@/lib/categories'
 import { recordAudit } from '@/lib/audit'
+import { sniffMediaCategory } from '@/lib/media-sniff'
 import { isCsamEnabled } from '@/lib/csam/config'
 import { claimForScan, scanAndApply } from '@/lib/csam/scan'
 
 export const runtime = 'nodejs'
+
+// Techo de píxeles para imágenes de contenido (~100 MP). Una foto legítima de
+// alta resolución queda holgada; corta las bombas de descompresión (~256 MP en
+// menos de 20 MB) que OOMearían la función de entrega en CADA vista del fan.
+const MAX_IMAGE_PIXELS = 100_000_000
 
 /**
  * POST /api/content — creator-facing content creation (the WRITE side, PR-3(A)).
@@ -111,19 +118,53 @@ export async function POST(req: NextRequest) {
     const media = form.get('media') as File | null
     if (!media) return err('Falta el archivo de contenido (media)')
 
-    let mediaType: MediaType
-    if (ALLOWED_IMAGE_MIME.has(media.type)) {
-      mediaType = 'image'
-      if (media.size > MAX_IMAGE_SIZE) {
-        return err(`media: la imagen excede ${MAX_IMAGE_SIZE / 1024 / 1024} MB`)
-      }
-    } else if (ALLOWED_VIDEO_MIME.has(media.type)) {
-      mediaType = 'video'
-      if (media.size > MAX_STORY_VIDEO_SIZE) {
-        return err(`media: el video excede ${MAX_STORY_VIDEO_SIZE / 1024 / 1024} MB`)
-      }
-    } else {
+    // Categoría DECLARADA por el MIME multipart (atacable). Se confirma abajo
+    // contra los bytes reales antes de confiar en ella para nada de seguridad.
+    const declaredCategory: MediaType | null = ALLOWED_IMAGE_MIME.has(media.type)
+      ? 'image'
+      : ALLOWED_VIDEO_MIME.has(media.type)
+        ? 'video'
+        : null
+    if (!declaredCategory) {
       return err(`media: tipo no permitido (${media.type || 'desconocido'}). Usá imagen o video.`)
+    }
+    if (declaredCategory === 'image' && media.size > MAX_IMAGE_SIZE) {
+      return err(`media: la imagen excede ${MAX_IMAGE_SIZE / 1024 / 1024} MB`)
+    }
+    if (declaredCategory === 'video' && media.size > MAX_STORY_VIDEO_SIZE) {
+      return err(`media: el video excede ${MAX_STORY_VIDEO_SIZE / 1024 / 1024} MB`)
+    }
+
+    // ── media_type AUTORITATIVO: sniff de magic-bytes, NO el MIME declarado ──────
+    // Sin esto un JPEG declarado `video/mp4` se serviría por la rama de video del
+    // endpoint de entrega SIN marca de agua por-fan → leak no trazable (rompe la
+    // única razón de ser de la marca). Se leen sólo los primeros KB: barato y sin
+    // cargar el archivo entero (clave para video).
+    const headBytes = new Uint8Array(await media.slice(0, 4096).arrayBuffer())
+    const sniffed = sniffMediaCategory(headBytes)
+    if (sniffed !== declaredCategory) {
+      return err(
+        `media: el contenido no coincide con el tipo declarado (declarado ${declaredCategory}, real ${sniffed}).`,
+      )
+    }
+    const mediaType: MediaType = declaredCategory
+
+    // Para imágenes: confirmar que sean DECODIFICABLES por sharp (un HEIC que este
+    // build no soporte entregaría 404 para siempre → mejor rechazarlo en el alta)
+    // y ACOTAR los píxeles (bomba de descompresión). metadata() lee el header, no
+    // decodifica el raster completo, así que las dimensiones salen sin costo alto.
+    if (mediaType === 'image') {
+      try {
+        const meta = await sharp(Buffer.from(await media.arrayBuffer()), {
+          failOn: 'none',
+          limitInputPixels: MAX_IMAGE_PIXELS,
+        }).metadata()
+        if (!meta.width || !meta.height || meta.width * meta.height > MAX_IMAGE_PIXELS) {
+          return err('media: imagen de dimensiones no válidas o demasiado grande.')
+        }
+      } catch {
+        return err('media: formato de imagen no soportado o archivo corrupto.')
+      }
     }
 
     // 4. Fail-closed BEFORE uploading: without a certified self 2257 record the

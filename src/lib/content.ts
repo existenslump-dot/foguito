@@ -28,6 +28,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 const CONTENT_BUCKET = 'creator-content'
 
+/** UUID guard — mirrors the admin content route's UUID_RE (fail-closed on junk ids). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export type Visibility = 'free_preview' | 'tier' | 'ppv'
 export type MediaType = 'image' | 'video' | 'audio'
 
@@ -250,4 +253,82 @@ export async function getContentForReview(
   const { media_ref: _omit, ...summary } = data
   void _omit
   return { ...summary, media_url, media_blocked }
+}
+
+/**
+ * Internal, SERVER-ONLY projection for the paid-fan delivery channel (PR-5).
+ *
+ * ⚠️ `media_ref` (the raw private `creator-content` path) is included ON PURPOSE
+ * so the delivery endpoint can download/sign the binary — but it MUST stay
+ * server-side. The endpoint NEVER echoes `media_ref` (nor, for images, a raw
+ * signed URL) back to the client; images are streamed as watermarked bytes.
+ */
+export type ContentForDelivery = {
+  id: string
+  creator_id: string
+  media_ref: string
+  media_type: MediaType
+  visibility: Visibility
+}
+
+/**
+ * Resolve a single content row for DELIVERY to a paying/entitled fan (PR-5).
+ *
+ * ┌── PAYWALL: single source of truth = RLS `content_select` ──────────────────┐
+ * │ The SELECT runs with the FAN's cookie-scoped client, so RLS is what decides │
+ * │ visibility: a row comes back ONLY if the fan is the creator, an admin, or    │
+ * │ the piece is published + csam-pass AND (free_preview | a non-expired         │
+ * │ entitlement | an active subscription). We do NOT re-implement the paywall    │
+ * │ here — a non-entitled fan simply gets no row → null. NEVER pass a            │
+ * │ service-role client as `fanClient`: that bypasses RLS and hands out          │
+ * │ everyone's private media.                                                    │
+ * └─────────────────────────────────────────────────────────────────────────────┘
+ *
+ * BELT-AND-SUSPENDERS beyond RLS (PILAR #0): even if a row comes back we refuse
+ * to proceed unless `status='published'` AND `csam_status='pass'` AND a
+ * `media_ref` is present. We NEVER hand back a path to unscanned / blocked /
+ * draft media, whatever RLS said.
+ *
+ * FAIL-CLOSED: invalid id, query error, no row, or the guard above ⇒ null. The
+ * caller MUST treat null as an opaque 404 — "not entitled" and "not found" look
+ * identical, so there is no entitlement oracle.
+ *
+ * `admin` is accepted for call-site symmetry with the delivery endpoint (which
+ * also holds the service-role signer); the ACCESS decision here uses ONLY
+ * `fanClient`. The returned object carries `media_ref` — the caller MUST NOT
+ * leak it (see the endpoint's file header).
+ */
+export async function getContentForDelivery(
+  fanClient: SupabaseClient,
+  admin: SupabaseClient,
+  contentId: string,
+): Promise<ContentForDelivery | null> {
+  void admin // access uses fanClient (RLS) only; admin is the endpoint's signer
+  if (!UUID_RE.test(contentId)) return null
+
+  const { data, error } = await fanClient
+    .from('content')
+    .select(`${SUMMARY_COLS}, media_ref`)
+    .eq('id', contentId)
+    .maybeSingle<ContentSummary & { media_ref: string | null }>()
+
+  if (error || !data) return null // fail-closed: not-entitled ≡ not-found
+
+  // Double-guard past RLS: never sign/serve unpublished, unscanned, or blocked.
+  if (
+    data.status !== 'published' ||
+    data.csam_status !== 'pass' ||
+    !data.media_ref ||
+    !data.media_type
+  ) {
+    return null
+  }
+
+  return {
+    id: data.id,
+    creator_id: data.creator_id,
+    media_ref: data.media_ref,
+    media_type: data.media_type,
+    visibility: data.visibility,
+  }
 }

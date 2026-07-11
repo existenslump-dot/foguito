@@ -155,7 +155,12 @@ const nextConfig: NextConfig = {
               // vercel.com / vercel.live images are used by the preview feedback widget.
               // Added res.cloudinary.com (already) + api.nowpayments.io (logo + qr).
               "img-src 'self' data: blob: https://res.cloudinary.com https://images.unsplash.com https://api.qrserver.com https://http2.mlstatic.com https://*.mercadopago.com https://*.mercadolibre.com https://*.mercadolivre.com https://vercel.com https://vercel.live https://api.nowpayments.io",
-              "media-src 'self' blob: https://res.cloudinary.com",
+              // *.supabase.co: el endpoint de entrega de contenido pagado
+              // (/api/content/[id]/media) responde el video/audio con un 302 a una
+              // URL firmada del bucket privado; sin esto en media-src el <video>/
+              // <audio> se bloquea al seguir el redirect (las imágenes salen como
+              // bytes same-origin, no necesitan esto).
+              "media-src 'self' blob: https://res.cloudinary.com https://*.supabase.co",
               "worker-src 'self' blob:",
               // MP Bricks pulls locale JSON from http2.mlstatic.com and fingerprint/iframe
               // from www.mercadolibre.com — both must be in connect-src or the card
