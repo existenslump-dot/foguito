@@ -2,18 +2,20 @@
  * Shared crawler / social-card bot allowlist.
  *
  * PURE + edge-safe (only regex + a string test) — safe to import from the edge
- * middleware AND from server components. Extracted from src/middleware.ts so the
- * SAME allowlist governs every place that must exempt bots:
+ * middleware AND from server components. Extracted from src/middleware.ts so a
+ * single allowlist governs the places that legitimately exempt bots:
  *   - the geo-block (middleware): crawlers hit from US datacenters and would get
  *     redirected to /blocked, killing indexation.
- *   - the age-gate (src/app/[city]/layout.tsx): a crawler can't verify age, so
- *     gating it would hide all content from search engines.
+ *   - the BetaGate overlay bypass (middleware): bots skip the login friction.
  *
- * A single source of truth here means the two gates can't drift apart (a bot
- * exempted from one but caught by the other would be a subtle SEO/UX bug).
+ * ⚠️ The consumer AGE-GATE deliberately does NOT use this allowlist. A UA string
+ * is forgeable, so exempting bots there would be a trivial one-header bypass; the
+ * gated adult surface is intentionally non-crawlable (it should not be indexed
+ * anyway). Only the SFW landing / `/verificar-edad` pages, which sit OUTSIDE the
+ * gate, stay indexable. See src/lib/age-gate/enforce.ts.
  *
- * This is the allowed form of "cloaking": bots see the same content a human will
- * see once past the gate, just without the login/verification friction.
+ * This UA match is the allowed form of "cloaking" for the geo-block/BetaGate
+ * only: bots see the same SFW surface a human will, without the login friction.
  */
 export const BOT_UA_PATTERNS: RegExp[] = [
   // Search engines

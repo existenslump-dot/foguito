@@ -24,8 +24,9 @@ const ALLOWED_COUNTRIES = MARKETPLACE.market.allowedCountries
 //   2. Bypass the BetaGate client overlay via a server-set cookie.
 // This is the allowed form of "cloaking": bots see the same content humans
 // will see once authenticated, just without the login friction. The allowlist
-// (`isCrawler`) is shared with the consumer age-gate (src/app/[city]/layout.tsx)
-// via src/lib/crawler.ts so both gates exempt EXACTLY the same bots.
+// (`isCrawler`) lives in src/lib/crawler.ts. NOTE: the consumer age-gate does
+// NOT reuse it — a forgeable UA must not open the age-gate, so gated adult
+// content stays intentionally non-crawlable (see src/lib/age-gate/enforce.ts).
 
 // ── Rate limit rules ──────────────────────────────────────────────────────────
 // { pattern, limit, windowMs, keyType }
