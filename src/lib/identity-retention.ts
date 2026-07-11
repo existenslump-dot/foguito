@@ -97,3 +97,29 @@ export async function purgeIdentityDocuments(
 
   return { removed: paths.length }
 }
+
+/**
+ * Purge a user's consumer age-gate verifications (PII minimization, pilar #0).
+ *
+ * `age_gate_verifications` holds only method/jurisdiction/verified_at/expires_at
+ * (never DOB/name/document — the webhook discards those), but it is still
+ * account-linked data we shouldn't keep past account closure. On FULL account
+ * deletion the `user_id -> auth.users ON DELETE CASCADE` already wipes these
+ * rows; this helper covers the closed-but-retained window (deletion_log) where
+ * the auth user may still exist. Uses the service-role admin client (bypasses
+ * RLS). Empty/no rows ⇒ `{ removed: 0 }`, never throws for "nothing to do".
+ */
+export async function purgeAgeGateVerifications(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<PurgeIdentityResult> {
+  const { data, error } = await admin
+    .from('age_gate_verifications')
+    .delete()
+    .eq('user_id', userId)
+    .select('id')
+  if (error) {
+    throw new Error(`[identity-retention] age-gate purge failed: ${error.message}`)
+  }
+  return { removed: data?.length ?? 0 }
+}

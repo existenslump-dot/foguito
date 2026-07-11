@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from '@/lib/clients/supabase-admin'
-import { purgeIdentityDocuments } from '@/lib/identity-retention'
+import { purgeIdentityDocuments, purgeAgeGateVerifications } from '@/lib/identity-retention'
 
 export const runtime = 'nodejs'
 
@@ -39,6 +39,10 @@ export async function GET(req: Request) {
     stats.eligible++
     try {
       const { removed } = await purgeIdentityDocuments(supabase, row.user_id)
+      // Also purge the fan's age-gate verifications (PII minimization). Only
+      // method/jurisdiction/timing live there, but it's account-linked data and
+      // shouldn't outlive the account past its retention window.
+      await purgeAgeGateVerifications(supabase, row.user_id)
       await supabase
         .from('deletion_log')
         .update({ identity_purged_at: new Date().toISOString() })

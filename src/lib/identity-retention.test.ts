@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   purgeIdentityDocuments,
   getIdentityRetentionDays,
+  purgeAgeGateVerifications,
 } from './identity-retention'
 
 /**
@@ -140,5 +141,42 @@ describe('purgeIdentityDocuments', () => {
   it('throws when the list call errors', async () => {
     const { client } = buildFake({ data: null, error: { message: 'boom' } })
     await expect(purgeIdentityDocuments(client, 'user-7')).rejects.toThrow(/boom/)
+  })
+})
+
+/** Fake for the delete().eq().select() chain of purgeAgeGateVerifications. */
+function buildDeleteFake(result: { data: { id: string }[] | null; error: { message: string } | null }) {
+  const filters: Array<{ col: string; val: unknown }> = []
+  const select = vi.fn(() => Promise.resolve(result))
+  const eq = vi.fn((col: string, val: unknown) => {
+    filters.push({ col, val })
+    return { select }
+  })
+  const del = vi.fn(() => ({ eq }))
+  const from = vi.fn((_table: string) => ({ delete: del }))
+  const client = { from } as unknown as SupabaseClient
+  return { client, from, del, eq, filters }
+}
+
+describe('purgeAgeGateVerifications', () => {
+  it('deletes the user rows and returns the removed count', async () => {
+    const { client, from, filters } = buildDeleteFake({
+      data: [{ id: 'a' }, { id: 'b' }],
+      error: null,
+    })
+    const result = await purgeAgeGateVerifications(client, 'user-7')
+    expect(result).toEqual({ removed: 2 })
+    expect(from).toHaveBeenCalledWith('age_gate_verifications')
+    expect(filters).toEqual([{ col: 'user_id', val: 'user-7' }])
+  })
+
+  it('returns { removed: 0 } when there is nothing to delete', async () => {
+    const { client } = buildDeleteFake({ data: [], error: null })
+    expect(await purgeAgeGateVerifications(client, 'user-x')).toEqual({ removed: 0 })
+  })
+
+  it('throws when the delete errors', async () => {
+    const { client } = buildDeleteFake({ data: null, error: { message: 'nope' } })
+    await expect(purgeAgeGateVerifications(client, 'user-7')).rejects.toThrow(/nope/)
   })
 })
