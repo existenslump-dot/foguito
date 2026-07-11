@@ -6,6 +6,7 @@ import { approveVerification, rejectVerification, type Result } from '@/lib/admi
 import { recordAudit } from '@/lib/audit'
 import { deriveAge } from './age'
 import { syncCreatorFromDidit } from '@/lib/creators'
+import { ensureSelfPerformerFromDidit } from '@/lib/performers'
 import {
   mapStatus,
   isTerminal,
@@ -126,7 +127,8 @@ export async function persistDiditDecision(
   // kyc_status/age_verified actually persist. The DB content_publish_guard is
   // the real authority; this keeps the creator's verification state in sync so
   // a verified 18+ creator can publish and a minor/undetermined one cannot.
-  const ageResult = deriveAge(extractIdVerification(decision)?.date_of_birth, new Date())
+  const idv = extractIdVerification(decision)
+  const ageResult = deriveAge(idv?.date_of_birth, new Date())
   const creatorSync = await syncCreatorFromDidit(admin, userId, {
     effectiveStatus,
     ageResult,
@@ -152,6 +154,33 @@ export async function persistDiditDecision(
         applied: creatorSync.applied,
       },
     })
+  }
+
+  // ── Auto-complete the creator's OWN 2257 record (PR-2) ─────────────────
+  // Once she's verified 18+ (age_verified — only set on approved + adult DOB),
+  // the Didit verdict IS the 2257 certification for her own appearance. Runs on
+  // the same service-role `admin` client → passes performers_2257_guard, so
+  // is_complete/dob_verified persist. Reached only when !stale && userId (both
+  // early-returned above), so a late/out-of-order webhook can't touch it.
+  // INVARIANTE #1: this (self, via the Didit verdict) and the admin's
+  // completePerformer are the ONLY paths that certify a 2257 record — the
+  // creator-facing /api/performers route never does.
+  if (creatorSync.applied === true && creatorSync.age_verified === true) {
+    // If Didit gave no usable name we still certify the self record with an
+    // empty (encrypted) name — the gate only cares about is_complete; the admin
+    // can fill the name later.
+    const legalName = `${idv?.first_name ?? ''} ${idv?.last_name ?? ''}`.trim()
+    const selfRes = await ensureSelfPerformerFromDidit(admin, userId, { legalName, sessionId })
+    if (selfRes.ok) {
+      void recordAudit({
+        eventType: 'performer_self_completed',
+        actorRole: 'system',
+        actorUserId: userId,
+        subjectType: 'performer',
+        subjectId: userId,
+        metadata: { didit_session_id: sessionId },
+      })
+    }
   }
 
   return {

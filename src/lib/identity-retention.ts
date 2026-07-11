@@ -18,6 +18,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 const IDENTITY_BUCKET = 'identity-documents'
 
 /**
+ * Sub-prefix under `{userId}/` that holds 2257 record-keeping documents
+ * (`{userId}/performers/**`). These are EXCLUDED from the account-closure purge:
+ * 2257 producer records carry a long legal retention window (18 U.S.C. § 2257)
+ * that is independent of the account's lifetime. We must not delete them here.
+ */
+const PERFORMERS_2257_PREFIX = 'performers'
+
+/**
  * Retention window (in days) before a closed account's identity documents are
  * purged. Configurable via `IDENTITY_RETENTION_DAYS`; defaults to 365 (1 year).
  * A value of `0` means "purge immediately on account deletion".
@@ -57,6 +65,14 @@ export async function purgeIdentityDocuments(
   const paths = (files ?? [])
     // `list` can return folder placeholders (name === null / empty); skip them.
     .filter((f) => Boolean(f?.name))
+    // NEVER purge 2257 documents: `{userId}/performers/**` has a long legal
+    // retention window (18 U.S.C. § 2257) independent of account closure. It
+    // surfaces here as a single `performers` folder entry (list is non-
+    // recursive); skipping it leaves the whole sub-tree untouched.
+    // Match defensivo (fail-closed para docs de retención legal): normalizamos
+    // barra final + casing antes de comparar, para que un cambio de formato del
+    // listado de Supabase no borre por accidente el subárbol 2257.
+    .filter((f) => f.name.replace(/\/+$/, '').toLowerCase() !== PERFORMERS_2257_PREFIX)
     .map((f) => `${userId}/${f.name}`)
 
   // 2. Remove the objects. Empty folder ⇒ nothing to do.

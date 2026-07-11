@@ -103,6 +103,21 @@ describe('purgeIdentityDocuments', () => {
     expect(profileUpdates[0].filter).toEqual({ id: 'user-7' })
   })
 
+  it('EXCLUDES the 2257 `performers/` sub-tree from the purge (18 U.S.C. 2257 retention)', async () => {
+    const { client, removed } = buildFake({
+      // `performers` is the folder placeholder for `{userId}/performers/**`.
+      data: [{ name: 'id_doc.jpg' }, { name: 'performers' }, { name: 'id_selfie.jpg' }],
+      error: null,
+    })
+
+    const result = await purgeIdentityDocuments(client, 'user-9')
+
+    // Only the two identity files removed — the 2257 records survive.
+    expect(result).toEqual({ removed: 2 })
+    expect(removed).toEqual([['user-9/id_doc.jpg', 'user-9/id_selfie.jpg']])
+    expect(removed.flat()).not.toContain('user-9/performers')
+  })
+
   it('is a no-op for an empty folder and does not throw', async () => {
     const { client, bucket, removed } = buildFake({ data: [], error: null })
 
