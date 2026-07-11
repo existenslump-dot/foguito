@@ -23,11 +23,15 @@ vi.mock('@/lib/clients/supabase-admin', () => ({
   getSupabaseAdmin: () => supabaseScenario,
 }))
 
-// Purge helper — replaced with a spy so we assert which users were purged
+// Purge helpers — replaced with spies so we assert which users were purged
 // without exercising real storage. Default: every user removed 2 files.
 const purgeSpy = vi.fn(async (_admin: unknown, _userId: string) => ({ removed: 2 }))
+// Age-gate purge (PR-4) runs alongside the document purge; spy so the cron's
+// call is satisfied and asserted without touching the DB.
+const ageGatePurgeSpy = vi.fn(async (_admin: unknown, _userId: string) => ({ removed: 0 }))
 vi.mock('@/lib/identity-retention', () => ({
   purgeIdentityDocuments: (admin: unknown, userId: string) => purgeSpy(admin, userId),
+  purgeAgeGateVerifications: (admin: unknown, userId: string) => ageGatePurgeSpy(admin, userId),
 }))
 
 // ─── Helpers ───────────────────────────────────────────────────────────
@@ -134,6 +138,11 @@ describe('GET /api/cron/identity-retention', () => {
     expect(purgeSpy).toHaveBeenCalledTimes(2)
     expect(purgeSpy).toHaveBeenCalledWith(expect.anything(), 'user-1')
     expect(purgeSpy).toHaveBeenCalledWith(expect.anything(), 'user-2')
+
+    // Age-gate verifications purged for both (PII minimization).
+    expect(ageGatePurgeSpy).toHaveBeenCalledTimes(2)
+    expect(ageGatePurgeSpy).toHaveBeenCalledWith(expect.anything(), 'user-1')
+    expect(ageGatePurgeSpy).toHaveBeenCalledWith(expect.anything(), 'user-2')
 
     // Both rows stamped.
     expect(rows[0].identity_purged_at).toBeTruthy()

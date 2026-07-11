@@ -2,6 +2,8 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { rateLimit } from '@/lib/rateLimit'
 import { getClientIp } from '@/lib/ip'
+import { isCrawler } from '@/lib/crawler'
+import { getViewerJurisdiction } from '@/lib/age-gate/viewer-geo'
 import { MARKETPLACE } from '@/config/marketplace.config'
 
 // Mirrors `TOTP_VERIFY_TTL_MS` in src/lib/totp.ts. Inlined here because
@@ -21,24 +23,10 @@ const ALLOWED_COUNTRIES = MARKETPLACE.market.allowedCountries
 //      the 'blocked' redirect otherwise and index nothing.
 //   2. Bypass the BetaGate client overlay via a server-set cookie.
 // This is the allowed form of "cloaking": bots see the same content humans
-// will see once authenticated, just without the login friction.
-const BOT_UA_PATTERNS: RegExp[] = [
-  // Search engines
-  /googlebot/i, /google-inspectiontool/i, /adsbot-google/i, /apis-google/i,
-  /bingbot/i, /adidxbot/i, /duckduckbot/i, /yandexbot/i, /baiduspider/i,
-  /sogou/i, /applebot/i, /petalbot/i, /seznambot/i,
-  // Social / link preview fetchers (OG image rendering)
-  /facebookexternalhit/i, /facebookcatalog/i, /twitterbot/i, /linkedinbot/i,
-  /slackbot/i, /discordbot/i, /telegrambot/i, /whatsapp/i, /pinterest/i,
-  /skypeuripreview/i, /vkshare/i, /redditbot/i,
-  // SEO tooling (optional — these don't rank your site but you may want them)
-  /ahrefsbot/i, /semrushbot/i, /mj12bot/i, /dotbot/i,
-]
-
-function isCrawler(userAgent: string): boolean {
-  if (!userAgent) return false
-  return BOT_UA_PATTERNS.some(p => p.test(userAgent))
-}
+// will see once authenticated, just without the login friction. The allowlist
+// (`isCrawler`) lives in src/lib/crawler.ts. NOTE: the consumer age-gate does
+// NOT reuse it — a forgeable UA must not open the age-gate, so gated adult
+// content stays intentionally non-crawlable (see src/lib/age-gate/enforce.ts).
 
 // ── Rate limit rules ──────────────────────────────────────────────────────────
 // { pattern, limit, windowMs, keyType }
@@ -61,6 +49,9 @@ const RATE_RULES: {
   { pattern: '/api/reviews',                        limit: 5,   windowMs: 60 * 60 * 1000, keyType: 'ip' },
   { pattern: '/api/report',                         limit: 10,  windowMs: 60 * 60 * 1000, keyType: 'ip' },
   { pattern: '/api/favorites',                      limit: 60,  windowMs: 60 * 1000,       keyType: 'ip' },
+  // ── Age verification (consumer gate) ──────────────────────────────────
+  { pattern: '/api/age-verify/start',               limit: 10,  windowMs: 60 * 60 * 1000, keyType: 'ip' },
+  { pattern: '/api/webhooks/age-verify',            limit: 120, windowMs: 60 * 1000,       keyType: 'ip' },
   { pattern: '/api/contact',                        limit: 3,   windowMs: 60 * 60 * 1000, keyType: 'ip' },
   { pattern: '/api/chat',                           limit: 20,  windowMs: 60 * 60 * 1000, keyType: 'ip' },
   { pattern: '/api/me-quiero-publicar',             limit: 5,   windowMs: 60 * 60 * 1000, keyType: 'ip' },
@@ -127,8 +118,13 @@ export async function middleware(request: NextRequest) {
   // Opt-in (FEATURE_GEO_BLOCK). Off by default so the boilerplate is globally
   // reachable; enable for a single-country deployment.
   if (MARKETPLACE.features.geoBlock) {
-    const country = (request as NextRequest & { geo?: { country?: string } }).geo?.country ?? 'CL'
-    if (!bot && !ALLOWED_COUNTRIES.includes(country)) {
+    // Next 16 removed `request.geo` (it read `undefined` and silently fell back
+    // to a constant 'CL', so the block was effectively broken). Read the
+    // viewer's country from Vercel's geo header instead — the same signal the
+    // consumer age-gate uses. FAIL-CLOSED: an unlocated viewer (country null)
+    // is NOT in ALLOWED_COUNTRIES → blocked.
+    const { country } = getViewerJurisdiction(request.headers)
+    if (!bot && !ALLOWED_COUNTRIES.includes(country ?? '')) {
       return NextResponse.redirect(new URL('/blocked', request.url))
     }
   }
