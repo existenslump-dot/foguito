@@ -29,8 +29,8 @@ vi.mock('@/lib/clients/supabase-admin', () => ({
 }))
 
 let createResult: { ok: true; id: string } | { ok: false; error: string } = { ok: true, id: 'perf-1' }
-const createSpy = vi.fn(() => Promise.resolve(createResult))
-vi.mock('@/lib/performers', () => ({ createPerformer: (...a: unknown[]) => createSpy(...(a as [])) }))
+const createSpy = vi.fn((..._a: unknown[]) => Promise.resolve(createResult))
+vi.mock('@/lib/performers', () => ({ createPerformer: (...a: unknown[]) => createSpy(...a) }))
 
 vi.mock('@/lib/audit', () => ({ recordAudit: vi.fn(() => Promise.resolve()) }))
 
