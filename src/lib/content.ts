@@ -197,6 +197,12 @@ export async function listContentForModeration(
 /** Full content record for admin review — includes a signed media URL. */
 export type ContentReview = ContentSummary & {
   media_url: string | null
+  /**
+   * true when csam_status='blocked' — the media is a CSAM hit that was
+   * preserved to the deny-all `csam-evidence` bucket and MUST NOT be surfaced.
+   * `media_url` is null in that case (never signed).
+   */
+  media_blocked: boolean
 }
 
 /**
@@ -206,6 +212,13 @@ export type ContentReview = ContentSummary & {
  * ⚠️ ADMIN ROUTES ONLY. The signed URL to the `creator-content` bucket must
  * NEVER reach a non-admin client — the paying-fan delivery channel (with
  * watermark + entitlement check) is PR-5. Returns null when the id is absent.
+ *
+ * ┌───────────────────────────────────────────────────────────────────────────┐
+ * │ PILAR #0: when csam_status='blocked' (a CSAM hit) we DO NOT sign the media  │
+ * │ — media_url stays null and `media_blocked=true`. The admin (nor anyone)     │
+ * │ must never re-view or re-propagate a hit's material: it lives blocked in    │
+ * │ the deny-all bucket + preserved as evidence. The status is 'removed' too.   │
+ * └───────────────────────────────────────────────────────────────────────────┘
  *
  * MUST be called with the service-role `admin` client.
  */
@@ -221,8 +234,11 @@ export async function getContentForReview(
 
   if (error || !data) return null
 
+  const media_blocked = data.csam_status === 'blocked'
+
   let media_url: string | null = null
-  if (data.media_ref) {
+  // NEVER sign a blocked hit's media — no re-view, no propagation.
+  if (data.media_ref && !media_blocked) {
     const { data: signed } = await admin.storage
       .from(CONTENT_BUCKET)
       .createSignedUrl(data.media_ref, 3600)
@@ -233,5 +249,5 @@ export async function getContentForReview(
   // signed URL is the only thing an admin needs.
   const { media_ref: _omit, ...summary } = data
   void _omit
-  return { ...summary, media_url }
+  return { ...summary, media_url, media_blocked }
 }

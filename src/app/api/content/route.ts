@@ -14,6 +14,8 @@ import { ALLOWED_IMAGE_MIME, ALLOWED_VIDEO_MIME } from '@/lib/upload-validation'
 import { MAX_IMAGE_SIZE, MAX_STORY_VIDEO_SIZE } from '@/lib/media-limits'
 import { TIERS } from '@/lib/categories'
 import { recordAudit } from '@/lib/audit'
+import { isCsamEnabled } from '@/lib/csam/config'
+import { claimForScan, scanAndApply } from '@/lib/csam/scan'
 
 export const runtime = 'nodejs'
 
@@ -176,6 +178,23 @@ export async function POST(req: NextRequest) {
       req,
       metadata: { visibility, media_type: mediaType },
     })
+
+    // 7. CSAM scan. The cron (/api/cron/csam-scan) is the AUTHORITATIVE,
+    //    fail-closed path (claim + retry). Here we best-effort scan INLINE only
+    //    when a real vendor isn't configured (stub/dev) so a draft gets a verdict
+    //    immediately. Any failure is NON-FATAL: scanAndApply requeues the row to
+    //    'uploaded' and the cron re-scans it. We NEVER publish here — a 'pass'
+    //    only advances the draft to 'in_review'; a hit blocks + preserves +
+    //    reports inline. When the real vendor IS enabled we defer to the cron.
+    if (!isCsamEnabled()) {
+      try {
+        if (await claimForScan(admin, created.id)) {
+          await scanAndApply(admin, created.id)
+        }
+      } catch (e) {
+        console.error('[api/content] inline CSAM scan failed (cron will retry):', e)
+      }
+    }
 
     return NextResponse.json({ id: created.id, media_ref: mediaRef })
   } catch (e) {
