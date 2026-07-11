@@ -203,4 +203,42 @@ describe('content · getContentForReview', () => {
     const { client } = buildFake({ selectData: null })
     expect(await getContentForReview(client, 'nope')).toBeNull()
   })
+
+  it('PILAR #0: NEVER signs a blocked hit and flags media_blocked', async () => {
+    let signCalled = false
+    const { client } = buildFake({
+      selectData: {
+        id: 'c-9', creator_id: 'u1', title: null, caption: null, media_type: 'image',
+        visibility: 'tier', required_tier: 'gold', ppv_price_credits: null,
+        status: 'removed', csam_status: 'blocked', published_at: null,
+        created_at: '2026-07-11T00:00:00Z', media_ref: 'u1/abc/media.jpg',
+      },
+    })
+    // Spy on the storage signer so we can assert it's never invoked.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(client as any).storage.from = () => ({
+      createSignedUrl: () => { signCalled = true; return Promise.resolve({ data: { signedUrl: 'x' }, error: null }) },
+    })
+    const r = await getContentForReview(client, 'c-9')
+    expect(r).not.toBeNull()
+    expect(r!.media_url).toBeNull()
+    expect(r!.media_blocked).toBe(true)
+    expect(signCalled).toBe(false)
+    expect(r as unknown as Record<string, unknown>).not.toHaveProperty('media_ref')
+  })
+
+  it('media_blocked is false for a non-blocked row (still signs)', async () => {
+    const { client } = buildFake({
+      selectData: {
+        id: 'c-8', creator_id: 'u1', title: null, caption: null, media_type: 'image',
+        visibility: 'free_preview', required_tier: null, ppv_price_credits: null,
+        status: 'in_review', csam_status: 'pass', published_at: null,
+        created_at: '2026-07-11T00:00:00Z', media_ref: 'u1/abc/media.jpg',
+      },
+      signedUrl: 'https://signed/media-8',
+    })
+    const r = await getContentForReview(client, 'c-8')
+    expect(r!.media_blocked).toBe(false)
+    expect(r!.media_url).toBe('https://signed/media-8')
+  })
 })
