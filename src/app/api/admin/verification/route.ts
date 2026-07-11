@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/clients/supabase-admin'
 import { requireAdmin } from '@/lib/clients/require-admin'
 import { approveVerification, rejectVerification } from '@/lib/admin/actions'
+import { recordAudit } from '@/lib/audit'
 
 /**
  * POST /api/admin/verification
@@ -25,24 +26,50 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export async function POST(req: NextRequest) {
   try {
-    const gate = await requireAdmin(req)
-    if (!gate.ok) return gate.response
-
+    // Parse the body BEFORE the gate so we know whether this is an age
+    // attestation (which raises the bar to fresh-TOTP). requireAdmin only reads
+    // headers/cookies, so consuming the body first is safe.
     const body = await req.json().catch(() => null) as
-      | { profileId?: string; action?: string; reason?: string }
+      | { profileId?: string; action?: string; reason?: string; ageAttested?: boolean }
       | null
     const profileId = String(body?.profileId ?? '').trim()
     const action = String(body?.action ?? '').trim()
+
+    // Manually attesting 18+ sets creators.age_verified=true, which alone
+    // unlocks publishing (bypassing the DOB-derived Didit path). Gate it behind
+    // a fresh admin 2FA re-verify — the middleware's page-level TOTP gate does
+    // NOT cover direct `/api/admin/*` calls. (Computing this boolean leaks
+    // nothing; no validation error is emitted before the gate.)
+    const ageAttesting = action === 'approve' && body?.ageAttested === true
+    const gate = await requireAdmin(req, { requireFreshTotp: ageAttesting })
+    if (!gate.ok) return gate.response
 
     if (!UUID_RE.test(profileId)) {
       return NextResponse.json({ error: 'profileId inválido (UUID esperado)' }, { status: 400 })
     }
 
+    if (body?.ageAttested !== undefined && typeof body.ageAttested !== 'boolean') {
+      return NextResponse.json({ error: 'ageAttested debe ser boolean' }, { status: 400 })
+    }
+
     const admin = getSupabaseAdmin()
 
     if (action === 'approve') {
-      const result = await approveVerification(admin, profileId)
+      const result = await approveVerification(admin, profileId, { ageAttested: body?.ageAttested === true })
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 })
+      // Explicit audit when 18+ is set by manual attestation (no DOB signal) —
+      // actor is the admin, subject is the attested profile/creator.
+      if (ageAttesting) {
+        void recordAudit({
+          eventType: 'creator_age_attested',
+          actorRole: 'admin',
+          actorUserId: gate.userId,
+          subjectType: 'creator',
+          subjectId: profileId,
+          req,
+          metadata: { via: 'admin_manual_attestation' },
+        })
+      }
       return NextResponse.json({ success: true })
     }
 

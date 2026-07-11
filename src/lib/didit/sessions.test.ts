@@ -159,4 +159,44 @@ describe('didit/sessions · persistDiditDecision', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toBe('db down')
   })
+
+  // ── PR-1: creators sync wiring ─────────────────────────────────────────
+  it('stale (late webhook) → does NOT upsert creators (never degrades a verified row)', async () => {
+    // Already-approved session + a late In Progress event = stale. The key
+    // guarantee: a tardy webhook must not touch the creators verification.
+    const { client, calls } = buildFake({ existing: { status: 'approved' } })
+    const r = await persistDiditDecision(client, body({ status: 'In Progress' }))
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data.stale).toBe(true)
+    expect(find(calls, 'creators', 'upsert')).toBeUndefined()
+  })
+
+  it('Approved + adult DOB → upserts creators with age_verified=true / kyc_status=verified', async () => {
+    const { client, calls } = buildFake()
+    const r = await persistDiditDecision(
+      client,
+      body({
+        status: 'Approved',
+        decision: {
+          face_match: { score: 97 },
+          liveness: { score: 92 },
+          id_verification: { date_of_birth: '1990-01-01' },
+        },
+      }),
+    )
+    expect(r.ok).toBe(true)
+    const creators = find(calls, 'creators', 'upsert')!
+    expect(creators).toBeTruthy()
+    const p = creators.payload as Record<string, unknown>
+    expect(p).toMatchObject({ user_id: 'user-1', kyc_status: 'verified', age_verified: true })
+    expect(typeof p.age_verified_at).toBe('string')
+  })
+
+  // (c) simple-signature-only → the verdict is NOT applied. That gate lives at
+  // the ROUTE layer (src/app/api/webhooks/didit/route.ts): it returns a 200
+  // no-op for verdict.method === 'simple' and never calls persistDiditDecision,
+  // because the 'simple' signature doesn't cover vendor_data / decision / DOB.
+  // persistDiditDecision itself is signature-agnostic (it only runs once the
+  // route has authenticated a full-body signature), so there's nothing to assert
+  // here — the invariant is documented + enforced upstream of this function.
 })

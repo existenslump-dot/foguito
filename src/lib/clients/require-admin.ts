@@ -36,11 +36,23 @@ type GateResult =
   | { ok: true; userId: string }
   | { ok: false; response: NextResponse }
 
+// Mirrors `TOTP_VERIFY_TTL_MS` in src/lib/totp.ts. Inlined (like src/middleware.ts
+// does) so this module doesn't pull `otpauth` / `node:crypto` into every route
+// that imports requireAdmin.
+const TOTP_VERIFY_TTL_MS = 12 * 60 * 60 * 1000
+
 export type RequireAdminOptions = {
   /** Bypass the same-origin check — reserve for callers that truly
    *  can't send an Origin header (CLI via shared secret, external
    *  webhook etc.). Document why at the call site. */
   skipOriginCheck?: boolean
+  /** Also require a FRESH admin TOTP verification (within TOTP_VERIFY_TTL_MS).
+   *  Reserve for high-sensitivity mutations that the middleware's page-level
+   *  TOTP gate doesn't cover — the middleware short-circuits on `/api/*`, so a
+   *  direct API call bypasses it. Fail-OPEN when TOTP isn't enabled or the
+   *  `totp_*` cols are missing (schema lag), mirroring the middleware, so this
+   *  can never lock an admin out. Only bites once the admin has 2FA enabled. */
+  requireFreshTotp?: boolean
 }
 
 export async function requireAdmin(
@@ -97,6 +109,36 @@ export async function requireAdmin(
     return {
       ok: false,
       response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    }
+  }
+
+  // 4. Optional fresh-TOTP gate for high-sensitivity mutations. Fail-open:
+  //    only enforced when the admin has TOTP enabled and the cols exist (a
+  //    42703 missing-column surfaces as `error` with null data → let through,
+  //    same as the middleware). A stale (or never-verified) 2FA session is
+  //    rejected with a machine-readable code so the client can bounce to
+  //    /auth/totp.
+  if (options?.requireFreshTotp) {
+    const { data: totpProf, error: totpErr } = await admin
+      .from('profiles')
+      .select('totp_enabled, last_totp_verified_at')
+      .eq('id', userId)
+      .single()
+
+    if (!totpErr && totpProf?.totp_enabled) {
+      const lastVerified = totpProf.last_totp_verified_at
+        ? new Date(totpProf.last_totp_verified_at).getTime()
+        : 0
+      const stale = Date.now() - lastVerified > TOTP_VERIFY_TTL_MS
+      if (stale) {
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: 'Se requiere verificación 2FA reciente', code: 'totp_required' },
+            { status: 403 },
+          ),
+        }
+      }
     }
   }
 
