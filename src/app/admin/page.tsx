@@ -16,6 +16,8 @@ import AdminGeo from '@/components/admin/AdminGeo'
 import AdminTierSettings from '@/components/admin/AdminTierSettings'
 import AdminQueue from '@/components/admin/AdminQueue'
 import AdminActivity from '@/components/admin/AdminActivity'
+import AdminPerformers, { type PerformerSummary } from '@/components/admin/AdminPerformers'
+import AdminContentQueue from '@/components/admin/AdminContentQueue'
 import { useMarketplaceDialog } from '@/components/ui/MarketplaceDialog'
 import { kycEnabled } from '@/lib/kyc'
 import type {
@@ -70,6 +72,10 @@ export default function AdminPanel() {
 
   // Identity verification queue — reject UI state lives inside <AdminVerifications/>.
   const [pendingVerifications, setPendingVerifications] = useState<AdminVerification[]>([])
+
+  // 2257 review queue — fed by /api/admin/performers (service-role). The
+  // <AdminContentQueue/> below self-fetches its own list, so it needs no state here.
+  const [pendingPerformers, setPendingPerformers] = useState<PerformerSummary[]>([])
 
   const [pendingReviews, setPendingReviews] = useState<AdminReview[]>([])
 
@@ -309,6 +315,22 @@ export default function AdminPanel() {
 
     await fetchSupportThreads()
 
+    // 2257 review queue via the admin API (performers_2257 is RLS-scoped; the
+    // route reads it with the service role). Non-fatal — surfaced separately.
+    if (KYC_ON) {
+      try {
+        const perfRes = await fetch('/api/admin/performers')
+        const perfData = await perfRes.json().catch(() => null)
+        if (perfRes.ok && Array.isArray(perfData?.performers)) {
+          setPendingPerformers(perfData.performers)
+        } else if (!perfRes.ok) {
+          errors.performers = `Registros 2257: ${perfData?.error ?? `HTTP ${perfRes.status}`}`
+        }
+      } catch (e) {
+        errors.performers = `Registros 2257: ${e instanceof Error ? e.message : 'error de red'}`
+      }
+    }
+
     const catsRes = await supabase.from('categories').select('*').order('name')
     if (catsRes.error) errors.categorias = `Categorías: ${catsRes.error.message}`
     setDynamicCategories(catsRes.data || [])
@@ -467,6 +489,16 @@ export default function AdminPanel() {
       .eq('verification_status', 'pending')
       .order('created_at', { ascending: true })
     setPendingVerifications(data || [])
+  }
+
+  async function fetchPerformers() {
+    try {
+      const res = await fetch('/api/admin/performers')
+      const data = await res.json().catch(() => null)
+      if (res.ok && Array.isArray(data?.performers)) setPendingPerformers(data.performers)
+    } catch {
+      // non-fatal: the 2257 queue just stays as-is until the next full refetch
+    }
   }
 
   async function openDocument(path: string) {
@@ -1712,6 +1744,21 @@ export default function AdminPanel() {
               openDocument={openDocument}
               notify={showNotification}
             />
+          )}
+
+          {/* Pilar #0 — 2257 record review + content moderation. Gated by the
+              same FEATURE_KYC flag as the verification module: with KYC off the
+              whole 18+/2257/content pillar UI is hidden (the DB guards stay on
+              regardless). Content moderation (AdminContentQueue) self-fetches. */}
+          {KYC_ON && (
+            <>
+              <AdminPerformers
+                performers={pendingPerformers}
+                onRefetch={fetchPerformers}
+                notify={showNotification}
+              />
+              <AdminContentQueue notify={showNotification} />
+            </>
           )}
 
           {REVIEWS_ON && (
