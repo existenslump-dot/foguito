@@ -21,6 +21,17 @@ export function isCsamEnabled(): boolean {
   return Boolean(process.env.CSAM_API_KEY && process.env.CSAM_VENDOR)
 }
 
+/**
+ * ¿Estamos en el deploy de PRODUCCIÓN? Los stubs (detector + reporter NCMEC) NO
+ * pueden hablar con autoridad en prod: en prod SIN vendor real todo debe fallar
+ * CERRADO (nada llega a csam_status='pass' ni a ncmec_status='reported'), para
+ * no publicar sin escaneo real ni dar por hecho un reporte obligatorio que nunca
+ * se envió. El stub solo puede emitir veredictos en dev/CI/preview.
+ */
+export function isProduction(): boolean {
+  return process.env.VERCEL_ENV === 'production'
+}
+
 /** API key del vendor de CSAM. Tira si falta — llamar tras `isCsamEnabled()`. */
 export function csamApiKey(): string {
   const key = process.env.CSAM_API_KEY

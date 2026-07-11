@@ -1,4 +1,5 @@
 import 'server-only'
+import { isProduction } from './config'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reporter NCMEC (CyberTipline) — el reporte de CSAM es OBLIGATORIO por ley.
@@ -64,6 +65,13 @@ export class NcmecReporterStub implements NcmecReporter {
       matchType: incident.matchType ?? null,
       provider: incident.provider,
     })
+    // FAIL-CLOSED en producción: el stub NUNCA puede dar por enviado un reporte
+    // obligatorio. En prod devuelve ok:false → el incidente queda 'failed' y el
+    // cron de retry lo mantiene vivo hasta que se cablee el reporter real. El
+    // reportId fake determinístico solo sirve en dev/CI para testear el pipeline.
+    if (isProduction()) {
+      return { ok: false, error: 'stub NCMEC reporter must not certify a report in production' }
+    }
     return { ok: true, reportId: `STUB-NCMEC-${incident.incidentId}` }
   }
 }

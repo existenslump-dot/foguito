@@ -1,6 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getCsamProvider } from './index'
+import { isCsamEnabled, isProduction } from './config'
 import type { CsamScanResult } from './provider'
 import { getNcmecReporter, type NcmecIncident } from './ncmec'
 import { recordAudit } from '@/lib/audit'
@@ -154,6 +155,15 @@ async function applyPass(
   row: ContentRow,
   result: CsamScanResult,
 ): Promise<void> {
+  // FAIL-CLOSED (belt-and-suspenders del guard del stub): en producción NUNCA
+  // certificamos un 'pass' sin vendor real. Tirar acá cae en el catch de
+  // scanAndApply → requeue → la pieza queda 'pending' y no se publica. El stub
+  // ya tira en prod; esto cubre cualquier proveedor que emitiera un pass indebido.
+  if (!isCsamEnabled() && isProduction()) {
+    throw new Error(
+      '[csam] refusing to certify pass in production without a real CSAM vendor (fail-closed)',
+    )
+  }
   const { error } = await admin
     .from('content')
     .update({ csam_status: 'pass', status: 'in_review', csam_scanned_at: new Date().toISOString() })

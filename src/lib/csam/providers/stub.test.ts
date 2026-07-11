@@ -3,7 +3,7 @@
  * StubCsamProvider — determinístico, sin red. Cubre el mapeo sentinel→veredicto
  * y el orden de prioridad (possible_minor gana sobre known_hash/review).
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { StubCsamProvider, CSAM_STUB_SENTINELS } from './stub'
 
 const provider = new StubCsamProvider()
@@ -57,5 +57,11 @@ describe('StubCsamProvider', () => {
     const r = await provider.scan(input('creator-1/clean/media.bin', bytes))
     expect(r.verdict).toBe('blocked')
     expect(r.matchType).toBe('known_hash')
+  })
+
+  it('FAIL-CLOSED en producción: scan() tira (el stub no puede certificar en prod)', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production')
+    await expect(provider.scan(input('creator-1/clean/media.jpg'))).rejects.toThrow(/production/)
+    vi.unstubAllEnvs()
   })
 })

@@ -53,4 +53,12 @@ describe('csam/ncmec', () => {
   it('the real reporter skeleton is fail-closed: report throws (not implemented)', async () => {
     await expect(new NcmecReporterHttp().report(incident)).rejects.toThrow(/not implemented/)
   })
+
+  it('FAIL-CLOSED en producción: el stub devuelve ok:false (no da por enviado un reporte)', async () => {
+    vi.stubEnv('VERCEL_ENV', 'production')
+    const r = await new NcmecReporterStub().report(incident)
+    expect(r.ok).toBe(false)
+    expect(r.reportId).toBeUndefined()
+    vi.unstubAllEnvs()
+  })
 })

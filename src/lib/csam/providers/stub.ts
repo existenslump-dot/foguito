@@ -3,6 +3,7 @@ import type {
   CsamScanInput,
   CsamScanResult,
 } from '../provider'
+import { isProduction } from '../config'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StubCsamProvider — SOLO SCAFFOLDING. NO es un detector real de CSAM.
@@ -48,6 +49,14 @@ export class StubCsamProvider implements CsamProvider {
   readonly name = 'stub'
 
   async scan(input: CsamScanInput): Promise<CsamScanResult> {
+    // FAIL-CLOSED en producción: el stub NO puede certificar nada en prod. Sin
+    // vendor real, esto tira → scanAndApply lo captura → requeue → la pieza queda
+    // 'pending' y NUNCA se publica. La detección real exige CSAM_VENDOR+API_KEY.
+    if (isProduction()) {
+      throw new Error(
+        '[csam] StubCsamProvider must not run in production — configure a real CSAM_VENDOR (fail-closed)',
+      )
+    }
     const haystack = buildHaystack(input)
 
     // Orden: el clasificador de posible-menor se evalúa PRIMERO — es el hit más
