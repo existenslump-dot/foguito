@@ -192,6 +192,53 @@ describe('didit/sessions · persistDiditDecision', () => {
     expect(typeof p.age_verified_at).toBe('string')
   })
 
+  // ── PR-2: self-performer 2257 auto-complete ────────────────────────────
+  it("Approved + adult DOB → also certifies the creator's OWN self 2257 record", async () => {
+    const { client, calls } = buildFake()
+    const r = await persistDiditDecision(
+      client,
+      body({
+        status: 'Approved',
+        decision: {
+          face_match: { score: 97 },
+          liveness: { score: 92 },
+          id_verification: { date_of_birth: '1990-01-01', first_name: 'Ada', last_name: 'Lovelace' },
+        },
+      }),
+    )
+    expect(r.ok).toBe(true)
+    const self = find(calls, 'performers_2257', 'insert')!
+    expect(self).toBeTruthy()
+    const p = self.payload as Record<string, unknown>
+    expect(p).toMatchObject({
+      added_by: 'user-1',
+      is_self: true,
+      is_complete: true,
+      dob_verified: true,
+      custodian: 'didit',
+    })
+    // legal name encrypted, never in the clear
+    expect(String(p.legal_name_enc)).toMatch(/^v1\./)
+  })
+
+  it('below-18 (approved doc) does NOT certify a self 2257 record', async () => {
+    const { client, calls } = buildFake()
+    const r = await persistDiditDecision(
+      client,
+      body({ status: 'Approved', decision: { id_verification: { date_of_birth: '2015-01-01' } } }),
+    )
+    expect(r.ok).toBe(true)
+    expect(find(calls, 'performers_2257', 'insert')).toBeUndefined()
+    expect(find(calls, 'performers_2257', 'update')).toBeUndefined()
+  })
+
+  it('stale (late webhook) → never touches performers_2257', async () => {
+    const { client, calls } = buildFake({ existing: { status: 'approved' } })
+    await persistDiditDecision(client, body({ status: 'In Progress' }))
+    expect(find(calls, 'performers_2257', 'insert')).toBeUndefined()
+    expect(find(calls, 'performers_2257', 'update')).toBeUndefined()
+  })
+
   // (c) simple-signature-only → the verdict is NOT applied. That gate lives at
   // the ROUTE layer (src/app/api/webhooks/didit/route.ts): it returns a 200
   // no-op for verdict.method === 'simple' and never calls persistDiditDecision,
