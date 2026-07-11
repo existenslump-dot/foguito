@@ -165,7 +165,7 @@ export async function persistDiditDecision(
   // INVARIANTE #1: this (self, via the Didit verdict) and the admin's
   // completePerformer are the ONLY paths that certify a 2257 record — the
   // creator-facing /api/performers route never does.
-  if (creatorSync.age_verified === true) {
+  if (creatorSync.applied === true && creatorSync.age_verified === true) {
     // If Didit gave no usable name we still certify the self record with an
     // empty (encrypted) name — the gate only cares about is_complete; the admin
     // can fill the name later.

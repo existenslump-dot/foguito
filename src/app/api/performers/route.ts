@@ -69,7 +69,9 @@ export async function POST(req: NextRequest) {
 
     const admin = getSupabaseAdmin()
 
-    const ext = (idDoc.name.split('.').pop() || 'jpg').toLowerCase()
+    // ext desde el MIME YA VALIDADO (no el filename del cliente): el filename
+    // podría traer basura/barras; idDoc.type ya pasó IMAGE_MIMES (jpg/png/webp).
+    const ext = idDoc.type === 'image/png' ? 'png' : idDoc.type === 'image/webp' ? 'webp' : 'jpg'
     // Bound to the SESSION user (gate.userId), never a body field. Kept under the
     // creator's own uid so her RLS scope covers it; the `performers/` sub-prefix
     // is retention-exempt (2257 legal retention).

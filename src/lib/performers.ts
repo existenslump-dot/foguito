@@ -229,12 +229,26 @@ export async function getPerformerForReview(
     }
   }
 
+  // DEFENSA (finding review PR-2): sólo firmamos un doc que viva bajo la carpeta
+  // propia del performer (`<added_by>/performers/…`). La RLS `performers_rw` sólo
+  // restringe `added_by`, así que un insert directo por SDK podría plantar un
+  // id_doc_path apuntando al DNI/selfie de OTRO usuario y hacer que el admin lo
+  // firme al revisar. No lo firmamos si sale de su prefijo. (El trigger
+  // performers_2257_guard además lo coacciona a NULL en el write no-service-role.)
   let doc_url: string | null = null
   if (data.id_doc_path) {
-    const { data: signed } = await admin.storage
-      .from(IDENTITY_BUCKET)
-      .createSignedUrl(data.id_doc_path, 3600)
-    doc_url = signed?.signedUrl ?? null
+    const expectedPrefix = data.added_by ? `${data.added_by}/performers/` : null
+    if (expectedPrefix && data.id_doc_path.startsWith(expectedPrefix)) {
+      const { data: signed } = await admin.storage
+        .from(IDENTITY_BUCKET)
+        .createSignedUrl(data.id_doc_path, 3600)
+      doc_url = signed?.signedUrl ?? null
+    } else {
+      console.error('[performers] id_doc_path fuera del prefijo del owner — no se firma', {
+        performerId,
+        added_by: data.added_by,
+      })
+    }
   }
 
   return {
