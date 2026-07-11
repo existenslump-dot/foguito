@@ -161,6 +161,7 @@ export async function rejectStory(
 export async function approveVerification(
   supabase: SupabaseClient,
   profileId: string,
+  opts?: { ageAttested?: boolean; skipCreatorMirror?: boolean },
 ): Promise<Result> {
   // Verification approval cascades to every post owned by the profile so
   // the ✓ badge shows on each card immediately.
@@ -177,13 +178,39 @@ export async function approveVerification(
     identity_verified: true,
     verification_status: 'approved',
   }).eq('user_id', profileId)
-  return toResult(undefined, postsErr)
+  if (postsErr) return toResult(undefined, postsErr)
+
+  // PR-1: mirror the verdict onto the `creators` row (must be a service-role
+  // client to pass creators_guard_privileged). age_verified ONLY when the admin
+  // explicitly attests age — the manual path carries no DOB signal, so default
+  // false (fail-closed: verified KYC but not yet 18+ ⇒ still can't publish).
+  //
+  // `skipCreatorMirror`: the Didit webhook path owns the `creators` write via
+  // syncCreatorFromDidit (which carries the DOB-derived age), so it passes true
+  // to avoid a double upsert / transient-state window. When we DO mirror it is
+  // best-effort: profiles/posts already committed, so a creators failure is
+  // logged, not surfaced as a 500 (the DB publish guard stays the authority —
+  // a missing creators row simply means "can't publish yet").
+  if (!opts?.skipCreatorMirror) {
+    const ageVerified = opts?.ageAttested === true
+    const { error: creatorErr } = await supabase.from('creators').upsert({
+      user_id: profileId,
+      kyc_status: 'verified',
+      age_verified: ageVerified,
+      ...(ageVerified ? { age_verified_at: new Date().toISOString() } : {}),
+    }, { onConflict: 'user_id' })
+    if (creatorErr) {
+      console.error('[admin/actions] approveVerification creators mirror failed (non-fatal)', creatorErr.message)
+    }
+  }
+  return { ok: true, data: undefined }
 }
 
 export async function rejectVerification(
   supabase: SupabaseClient,
   profileId: string,
   reason: string,
+  opts?: { skipCreatorMirror?: boolean },
 ): Promise<Result> {
   if (!reason.trim()) {
     return { ok: false, error: 'Reason is required' }
@@ -202,7 +229,21 @@ export async function rejectVerification(
     verification_status: 'rejected',
     identity_verified: false,
   }).eq('user_id', profileId)
-  return toResult(undefined, postsErr)
+  if (postsErr) return toResult(undefined, postsErr)
+
+  // PR-1: reflect the rejection on the `creators` row (service-role client).
+  // Best-effort + `skipCreatorMirror` for the same reasons as approveVerification.
+  if (!opts?.skipCreatorMirror) {
+    const { error: creatorErr } = await supabase.from('creators').upsert({
+      user_id: profileId,
+      kyc_status: 'rejected',
+      age_verified: false,
+    }, { onConflict: 'user_id' })
+    if (creatorErr) {
+      console.error('[admin/actions] rejectVerification creators mirror failed (non-fatal)', creatorErr.message)
+    }
+  }
+  return { ok: true, data: undefined }
 }
 
 // ── Reports ────────────────────────────────────────────────────────────

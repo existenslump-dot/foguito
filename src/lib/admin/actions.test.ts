@@ -40,7 +40,12 @@ function buildFake(
       insert: vi.fn((p: unknown) => { op = 'insert'; payload = p; return builder }),
       update: vi.fn((p: unknown) => { op = 'update'; payload = p; return builder }),
       delete: vi.fn(() => { op = 'delete'; return builder }),
-      upsert: vi.fn((p: unknown) => { op = 'upsert'; payload = p; return builder }),
+      upsert: vi.fn((p: unknown, opts?: unknown) => {
+        op = 'upsert'; payload = p
+        // upsert has no .eq() step, so trace it here (filter = the options object).
+        trace.push({ table, op, payload, filter: opts ?? null })
+        return builder
+      }),
       eq: vi.fn((col: string, val: unknown) => {
         trace.push({ table, op, payload, filter: { [col]: val } })
         return builder
@@ -149,6 +154,25 @@ describe('approveVerification', () => {
     expect(trace.length).toBe(1) // posts update never ran
   })
 
+  it('marks the creators row verified; age_verified=false without attestation', async () => {
+    const { client, trace } = buildFake()
+    await approveVerification(client, 'profile-9')
+    const creators = trace.find((t) => t.table === 'creators')!
+    expect(creators.op).toBe('upsert')
+    expect(creators.filter).toEqual({ onConflict: 'user_id' })
+    const payload = creators.payload as Record<string, unknown>
+    expect(payload).toMatchObject({ user_id: 'profile-9', kyc_status: 'verified', age_verified: false })
+    expect(payload.age_verified_at).toBeUndefined()
+  })
+
+  it('sets age_verified=true (+ age_verified_at) when ageAttested', async () => {
+    const { client, trace } = buildFake()
+    await approveVerification(client, 'profile-9', { ageAttested: true })
+    const payload = trace.find((t) => t.table === 'creators')!.payload as Record<string, unknown>
+    expect(payload.age_verified).toBe(true)
+    expect(typeof payload.age_verified_at).toBe('string')
+  })
+
   it('flags an explicit error when the profile update matches 0 rows', async () => {
     const { client, trace } = buildFake({}, { profiles: [] })
     const result = await approveVerification(client, 'profile-9')
@@ -174,6 +198,10 @@ describe('rejectVerification', () => {
       identity_verified: false,
     })
     expect(trace[1].table).toBe('posts')
+    const creators = trace.find((t) => t.table === 'creators')!
+    expect(creators.op).toBe('upsert')
+    expect(creators.filter).toEqual({ onConflict: 'user_id' })
+    expect(creators.payload).toEqual({ user_id: 'profile-9', kyc_status: 'rejected', age_verified: false })
   })
 
   it('flags an explicit error when the profile update matches 0 rows', async () => {

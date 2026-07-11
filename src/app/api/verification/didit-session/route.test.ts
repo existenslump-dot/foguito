@@ -13,6 +13,7 @@ let userGate: { ok: true; userId: string } | { ok: false; response: Response } =
 }
 let insertError: { message: string } | null = null
 const inserted: unknown[] = []
+const upserted: Array<{ table: string; row: unknown }> = []
 
 vi.mock('@/lib/didit/config', () => ({
   isDiditEnabled: () => enabled,
@@ -26,10 +27,14 @@ vi.mock('@/lib/clients/require-user', () => ({
 }))
 vi.mock('@/lib/clients/supabase-admin', () => ({
   getSupabaseAdmin: () => ({
-    from: () => ({
+    from: (table: string) => ({
       insert: (row: unknown) => {
         inserted.push(row)
         return Promise.resolve({ error: insertError })
+      },
+      upsert: (row: unknown) => {
+        upserted.push({ table, row })
+        return Promise.resolve({ error: null })
       },
     }),
   }),
@@ -61,6 +66,7 @@ describe('POST /api/verification/didit-session', () => {
     userGate = { ok: true, userId: 'user-1' }
     insertError = null
     inserted.length = 0
+    upserted.length = 0
   })
 
   it('503 if Didit is disabled', async () => {
@@ -78,6 +84,9 @@ describe('POST /api/verification/didit-session', () => {
     expect(row.user_id).toBe('user-1')
     expect(row.didit_session_id).toBe('sess-1')
     expect(row.status).toBe('created')
+    // ensureCreatorRow: a creators row is upserted with the session id.
+    const creators = upserted.find((u) => u.table === 'creators')!
+    expect(creators.row).toMatchObject({ user_id: 'user-1', didit_session_id: 'sess-1' })
   })
 
   it('propagates the auth gate (401)', async () => {

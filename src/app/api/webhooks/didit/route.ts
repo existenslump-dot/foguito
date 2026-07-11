@@ -56,9 +56,61 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: verdict.reason }, { status: 401 })
   }
 
+  // The verdict we're about to apply TRUSTS vendor_data (the user id) and the
+  // `decision` sub-object (the DOB → 18+ gate). Only the full-body signatures
+  // ('v2'/'original') cover those bytes. The 'simple' signature covers ONLY
+  // `timestamp:session_id:status:webhook_type` — a valid-simple event could
+  // carry a forged vendor_data/decision (and its `created_at` freshness isn't
+  // signed either). So: authenticate it, but never APPLY it. 200 no-op so Didit
+  // doesn't retry-storm.
+  if (verdict.method === 'simple') {
+    console.warn('[webhook/didit] simple-signature only — verdict NOT applied (vendor_data/decision outside this signature scope)', {
+      session_id: body.session_id,
+      status: body.status,
+    })
+    return NextResponse.json({ ok: true, skipped: 'simple_signature_scope' })
+  }
+
   const admin = getSupabaseAdmin()
+
+  // ── Replay / dedup guard ───────────────────────────────────────────────
+  // Freshness (300s) authenticates an event but doesn't stop the SAME event
+  // from being processed twice (Didit retry, or a replay captured within the
+  // window). Record the event's natural key BEFORE persisting; a PK conflict
+  // (23505) means we already processed it → no-op. `created_at` is guaranteed
+  // to be a finite number here (verifyDiditWebhook rejected it otherwise).
+  const eventCreatedAt =
+    typeof body.created_at === 'number' && Number.isFinite(body.created_at) ? body.created_at : null
+  let dedupInserted = false
+  if (eventCreatedAt !== null) {
+    const { error: dedupErr } = await admin.from('didit_webhook_events').insert({
+      session_id: String(body.session_id ?? ''),
+      status: String(body.status ?? ''),
+      event_created_at: eventCreatedAt,
+    })
+    if (dedupErr) {
+      if (dedupErr.code === '23505') {
+        return NextResponse.json({ ok: true, deduped: true })
+      }
+      console.error('[webhook/didit] dedup insert failed:', dedupErr.message)
+      return NextResponse.json({ error: 'dedup insert failed' }, { status: 500 })
+    }
+    dedupInserted = true
+  }
+
   const result = await persistDiditDecision(admin, body)
   if (!result.ok) {
+    // Roll back the dedup marker so Didit's retry can re-process this event
+    // (otherwise a transient persist failure would be silently dropped as a
+    // "replay" on retry).
+    if (dedupInserted && eventCreatedAt !== null) {
+      await admin
+        .from('didit_webhook_events')
+        .delete()
+        .eq('session_id', String(body.session_id ?? ''))
+        .eq('status', String(body.status ?? ''))
+        .eq('event_created_at', eventCreatedAt)
+    }
     console.error('[webhook/didit] persistence failed:', result.error)
     return NextResponse.json({ error: result.error }, { status: 500 })
   }

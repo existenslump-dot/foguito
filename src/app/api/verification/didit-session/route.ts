@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/clients/require-user'
 import { getSupabaseAdmin } from '@/lib/clients/supabase-admin'
 import { isDiditEnabled, diditWorkflowId } from '@/lib/didit/config'
 import { createSession } from '@/lib/didit/client'
+import { ensureCreatorRow } from '@/lib/creators'
 import { recordAudit } from '@/lib/audit'
 
 export const runtime = 'nodejs'
@@ -58,6 +59,10 @@ export async function POST(req: NextRequest) {
   if (insertErr) {
     console.error('[didit-session] verification_sessions insert failed (non-fatal):', insertErr.message)
   }
+
+  // Ensure the creators row exists (best-effort, non-fatal) so the webhook's
+  // verdict has a row to upsert onto and the session id is linked from the start.
+  await ensureCreatorRow(admin, userId, session.data.session_id)
 
   void recordAudit({
     eventType: 'kyc_didit_session_started',

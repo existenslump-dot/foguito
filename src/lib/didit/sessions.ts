@@ -3,11 +3,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DiditDecision } from './types'
 import { encryptJson } from './crypto'
 import { approveVerification, rejectVerification, type Result } from '@/lib/admin/actions'
+import { recordAudit } from '@/lib/audit'
+import { deriveAge } from './age'
+import { syncCreatorFromDidit } from '@/lib/creators'
 import {
   mapStatus,
   isTerminal,
   extractScores,
   extractDeclineReason,
+  extractIdVerification,
 } from './mapping'
 
 /**
@@ -98,12 +102,16 @@ export async function persistDiditDecision(
     return { ok: true, data: { userId, internalStatus, applied: false, stale } }
   }
 
+  // skipCreatorMirror: syncCreatorFromDidit (below) is the SOLE owner of the
+  // `creators` write on this path — it carries the DOB-derived age. Letting
+  // approve/reject also upsert creators would double-write + open a transient
+  // window where the row is set without the age verdict.
   if (internalStatus === 'approved') {
-    const r = await approveVerification(admin, userId)
+    const r = await approveVerification(admin, userId, { skipCreatorMirror: true })
     if (!r.ok) return r
   } else if (internalStatus === 'declined') {
     const reason = declineReason ? `Didit: ${declineReason}` : 'Verification declined by Didit'
-    const r = await rejectVerification(admin, userId, reason)
+    const r = await rejectVerification(admin, userId, reason, { skipCreatorMirror: true })
     if (!r.ok) return r
   } else if (internalStatus === 'in_review') {
     // Falls into the admin's manual queue (AdminVerifications filters by 'pending').
@@ -111,6 +119,40 @@ export async function persistDiditDecision(
     if (!r.ok) return r
   }
   // in_progress / created / abandoned / expired → no profile change.
+
+  // ── Sync the creators row (PR-1: explicit 18+ gate) ────────────────────
+  // Reached only when !stale && userId (early-returned above). Uses the same
+  // service-role `admin` client → passes creators_guard_privileged so
+  // kyc_status/age_verified actually persist. The DB content_publish_guard is
+  // the real authority; this keeps the creator's verification state in sync so
+  // a verified 18+ creator can publish and a minor/undetermined one cannot.
+  const ageResult = deriveAge(extractIdVerification(decision)?.date_of_birth, new Date())
+  const creatorSync = await syncCreatorFromDidit(admin, userId, {
+    effectiveStatus,
+    ageResult,
+    sessionId,
+  })
+  // Audit only when the gate actually acted (verified/rejected/pending) — this
+  // also captures a DB-write failure (kyc_status set, applied=false). Pure
+  // no-op statuses (in_progress/created/…) are already covered by the webhook's
+  // kyc_didit_* audit, so we don't add noise here.
+  if (creatorSync.kyc_status !== null) {
+    void recordAudit({
+      eventType: `kyc_creator_${creatorSync.kyc_status}`,
+      actorRole: 'system',
+      actorUserId: userId,
+      subjectType: 'creator',
+      subjectId: userId,
+      metadata: {
+        didit_session_id: sessionId,
+        effective_status: effectiveStatus,
+        // reason only — never the DOB itself (PII lives encrypted in the session).
+        age_reason: creatorSync.reason,
+        age_verified: creatorSync.age_verified,
+        applied: creatorSync.applied,
+      },
+    })
+  }
 
   return {
     ok: true,
