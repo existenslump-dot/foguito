@@ -18,6 +18,7 @@ import AdminQueue from '@/components/admin/AdminQueue'
 import AdminActivity from '@/components/admin/AdminActivity'
 import AdminPerformers, { type PerformerSummary } from '@/components/admin/AdminPerformers'
 import AdminContentQueue from '@/components/admin/AdminContentQueue'
+import AdminModerationQueue from '@/components/admin/AdminModerationQueue'
 import { useMarketplaceDialog } from '@/components/ui/MarketplaceDialog'
 import { kycEnabled } from '@/lib/kyc'
 import type {
@@ -1758,6 +1759,7 @@ export default function AdminPanel() {
                 notify={showNotification}
               />
               <AdminContentQueue notify={showNotification} />
+              <AdminModerationQueue notify={showNotification} />
             </>
           )}
 

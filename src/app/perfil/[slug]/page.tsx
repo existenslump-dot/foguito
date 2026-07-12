@@ -12,6 +12,7 @@ import { listCreatorTeasers } from '@/lib/content'
 import { getFoguitoBalance } from '@/lib/credits'
 import ContentUnlockButton from '@/components/ContentUnlockButton'
 import SubscribeButton from '@/components/SubscribeButton'
+import ContentReportButton from '@/components/ContentReportButton'
 
 export async function generateMetadata({
   params,
@@ -390,6 +391,12 @@ export default async function PublicProfilePage({
                           ) : offersSubs && subPrice !== null ? (
                             <SubscribeButton creatorId={profile.id} priceLabel={`${subPrice.toLocaleString()} foguitos`} />
                           ) : null
+                        )}
+                        {/* Afordancia de queja (PR-9) — el server pone content_id + reporter. */}
+                        {!isOwnProfile && (
+                          <div>
+                            <ContentReportButton contentId={c.id} />
+                          </div>
                         )}
                       </div>
                     </div>
