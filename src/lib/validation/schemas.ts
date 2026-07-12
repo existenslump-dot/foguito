@@ -200,6 +200,28 @@ export const ReportSchema = z.object({
   description: ShortText.optional(),
 })
 
+// ── /api/content/[id]/report ───────────────────────────────────────────
+
+/**
+ * Complaint intake sobre una pieza de contenido de creadora (PR-9). El
+ * `content_id` NO viene del body — sale del path param (validado como UUID en la
+ * ruta). Idem el reporter (id/IP): salen de la sesión/headers server-side, nunca
+ * del cliente. Sólo la categoría + una descripción opcional acotada.
+ */
+export const ContentReportCategory = z.enum([
+  'illegal',
+  'dmca',
+  'nonconsensual',
+  'csam_suspected',
+  'spam',
+  'other',
+])
+
+export const ContentReportSchema = z.object({
+  category:    ContentReportCategory,
+  description: z.string().trim().max(2000).optional(),
+})
+
 // ── /api/auth/gate ─────────────────────────────────────────────────────
 
 /**
