@@ -148,9 +148,22 @@ export async function POST(req: Request) {
           req,
           metadata: { provider: order.provider, payment_status: paymentStatus },
         })
+      } else if (status === 'aml_hold') {
+        // GATE AML del consumidor (PR-10): el fan quedó 'hit' → la RPC retuvo la
+        // orden en 'held_aml' y NO acreditó. El dinero ya settleó en el procesador,
+        // así que se ACKEA 200 (un 500/reintento NO levantaría el hold; se libera por
+        // revisión manual del admin). Se audita para el trail de compliance.
+        void recordAudit({
+          eventType: 'foguitos_aml_hold',
+          actorRole: 'system',
+          subjectType: 'foguito_order',
+          subjectId: orderRef,
+          req,
+          metadata: { provider: order.provider, payment_status: paymentStatus },
+        })
       }
-      // 'ok' | 'already_applied' | 'not_pending' | 'no_order' | 'invalid' → todos
-      // se ackean (idempotencia / terminal-freeze los resuelve la RPC).
+      // 'ok' | 'aml_hold' | 'already_applied' | 'not_pending' | 'no_order' | 'invalid'
+      // → todos se ackean (idempotencia / terminal-freeze / hold los resuelve la RPC).
       return NextResponse.json({ ok: true, status })
     }
 

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/clients/supabase-admin'
 import { requireAdmin } from '@/lib/clients/require-admin'
 import { advancePayout, type AdvancePayoutStatus, type PayoutTargetStatus } from '@/lib/payouts'
-import { getPayoutProvider, getSanctionsProvider } from '@/lib/payouts/provider'
+import { getPayoutProvider } from '@/lib/payouts/provider'
+import { screenSubject } from '@/lib/aml'
 import { assembleTravelRuleInfo, submitTravelRule } from '@/lib/payouts/provider/travel-rule'
 import { recordAudit } from '@/lib/audit'
 
@@ -150,11 +151,14 @@ async function handleSend(
     .maybeSingle()) as { data: CreatorRow }
 
   // (a) Re-screening de sanciones (defensa en profundidad; la RPC + guard son la
-  //     autoridad final). Un throw del vendor ⇒ held (no se pudo screenear → no envía).
+  //     autoridad final). Vía el motor AML → deja el trail append-only
+  //     (subject_type='payout') + refresca `creators.sanctions_status`. Un throw del
+  //     vendor (o del write) ⇒ held (no se pudo screenear → no envía).
   let sanctionsRef: string
   try {
-    const screen = await getSanctionsProvider().screen({
-      creatorId: payout.creator_id,
+    const screen = await screenSubject(admin, {
+      subjectType: 'payout',
+      subjectId: payout.creator_id,
       legalName: creator?.pseudonym ?? null,
       country: creator?.country ?? null,
     })

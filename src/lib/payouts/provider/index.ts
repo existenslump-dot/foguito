@@ -124,8 +124,14 @@ export function getPayoutProvider(): PayoutProvider {
 /** Veredicto del screening. Mapea 1:1 a `creators.sanctions_status`. */
 export type SanctionsStatus = 'clear' | 'review' | 'hit'
 
+/** Superficie del screening (PR-10): las TRES caras del AML. */
+export type SanctionsSubjectType = 'creator' | 'consumer' | 'payout'
+
 export interface SanctionsScreenArgs {
-  creatorId: string
+  /** Id del sujeto: creadora (`user_id`), consumidor (`profiles.id`) o payout (creator_id). */
+  subjectId: string
+  /** Qué superficie se está screeneando. Cablea el ref del stub + el trail AML. */
+  subjectType: SanctionsSubjectType
   legalName?: string | null
   country?: string | null
 }
@@ -138,7 +144,7 @@ export interface SanctionsScreenResult {
 
 export interface SanctionsProvider {
   readonly name: string
-  /** Screenea a la creadora contra listas de sanciones. Idempotente por creatorId. */
+  /** Screenea al sujeto contra listas de sanciones. Idempotente por subjectId. */
   screen(args: SanctionsScreenArgs): Promise<SanctionsScreenResult>
 }
 
@@ -168,7 +174,7 @@ export class VendorSanctionsProvider implements SanctionsProvider {
  * jamás puede habilitar un payout en prod. (Espeja NcmecReporterStub, que en prod
  * jamás certifica un reporte.)
  *
- * En dev/CI es DETERMINÍSTICO por creatorId (para testear el flujo completo):
+ * En dev/CI es DETERMINÍSTICO por subjectId (para testear el flujo completo):
  * default 'clear', salvo un sentinel en el id (`sanctions-hit` → 'hit',
  * `sanctions-review` → 'review') — mismo patrón que el stub de CSAM.
  */
@@ -176,15 +182,16 @@ export class StubSanctionsProvider implements SanctionsProvider {
   readonly name = 'stub'
 
   async screen(args: SanctionsScreenArgs): Promise<SanctionsScreenResult> {
-    const ref = `STUB-SANCTIONS-${args.creatorId}`
+    const ref = `STUB-SANCTIONS-${args.subjectType}-${args.subjectId}`
     if (isProduction()) {
       // Fail-closed: en prod el stub jamás clarea. Queda en 'review' → no elegible.
       console.warn('[payouts] STUB sanctions provider in production — forcing review (no auto-clear)', {
-        creatorId: args.creatorId,
+        subjectType: args.subjectType,
+        subjectId: args.subjectId,
       })
       return { status: 'review', ref }
     }
-    const id = args.creatorId.toLowerCase()
+    const id = args.subjectId.toLowerCase()
     const status: SanctionsStatus = id.includes('sanctions-hit')
       ? 'hit'
       : id.includes('sanctions-review')

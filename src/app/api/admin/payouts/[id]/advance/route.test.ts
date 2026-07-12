@@ -60,17 +60,22 @@ vi.mock('@/lib/clients/supabase-admin', () => ({
 }))
 
 // ── providers ────────────────────────────────────────────────────────
+// El screening de sanciones ahora pasa por el motor AML (`screenSubject`), que
+// además deja el trail + refresca el status; el route sólo lee { status, ref }.
 let sanctionsResult: { status: 'clear' | 'review' | 'hit'; ref: string } = { status: 'clear', ref: 'S-1' }
 let sanctionsThrows = false
 const screenSpy = vi.fn((..._a: unknown[]) =>
-  sanctionsThrows ? Promise.reject(new Error('sanctions boom')) : Promise.resolve(sanctionsResult),
+  sanctionsThrows
+    ? Promise.reject(new Error('sanctions boom'))
+    : Promise.resolve({ ...sanctionsResult, provider: 'stub' }),
 )
+vi.mock('@/lib/aml', () => ({ screenSubject: (...a: unknown[]) => screenSpy(...a) }))
+
 let sendThrows = false
 const sendSpy = vi.fn((..._a: unknown[]) =>
   sendThrows ? Promise.reject(new Error('vasp unwired')) : Promise.resolve({ vaspTxId: 'VASP-1' }),
 )
 vi.mock('@/lib/payouts/provider', () => ({
-  getSanctionsProvider: () => ({ screen: screenSpy }),
   getPayoutProvider: () => ({ sendPayout: sendSpy }),
 }))
 

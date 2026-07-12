@@ -170,6 +170,18 @@ describe('POST /api/webhooks/foguitos/nowpayments', () => {
     expect(res.status).toBe(500)
   })
 
+  it('gate AML: la RPC devuelve aml_hold → 200, audita foguitos_aml_hold, NO audita compra', async () => {
+    // El fan quedó 'hit' → la RPC retuvo la orden en held_aml sin acreditar. El dinero
+    // ya settleó; un reintento no levantaría el hold → se ackea 200 (no 500).
+    rpcResult = { data: 'aml_hold', error: null }
+    const res = await POST(makeReq(basePayload))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, status: 'aml_hold' })
+    const evt = auditSpy.mock.calls.map((c) => (c[0] as Record<string, unknown>).eventType)
+    expect(evt).toContain('foguitos_aml_hold')
+    expect(evt).not.toContain('foguitos_purchased')
+  })
+
   it('estado failed → marca la orden failed (sólo pending), no credita', async () => {
     const res = await POST(makeReq({ ...basePayload, payment_status: 'failed' }))
     expect(res.status).toBe(200)
