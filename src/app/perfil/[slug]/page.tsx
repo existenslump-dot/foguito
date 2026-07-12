@@ -7,6 +7,11 @@ import type { Metadata } from 'next'
 import { TIER_BADGE_STYLES } from '@/lib/categories'
 import { postCanonicalPath } from '@/lib/post-url'
 import { getCloudinaryUrl, getWatermarkedImageUrl } from '@/lib/cloudinary'
+import { getSupabaseAdmin } from '@/lib/clients/supabase-admin'
+import { listCreatorTeasers } from '@/lib/content'
+import { getFoguitoBalance } from '@/lib/credits'
+import ContentUnlockButton from '@/components/ContentUnlockButton'
+import SubscribeButton from '@/components/SubscribeButton'
 
 export async function generateMetadata({
   params,
@@ -51,23 +56,45 @@ export default async function PublicProfilePage({
     .eq('is_approved', true)
     .order('created_at', { ascending: false })
 
-  // Contenido de creadora (paywall). El MISMO cliente cookie-scoped → la RLS
-  // `content_select` filtra a lo que ESTE viewer puede ver: free_preview + lo
-  // que tenga desbloqueado (entitlement/suscripción). Las piezas gateadas que el
-  // fan NO desbloqueó simplemente NO vuelven de la query (RLS las oculta), así
-  // que acá sólo se listan las visibles — nunca teasers bloqueados.
+  // Contenido de creadora (paywall), PR-6 — descubrimiento con teasers.
   //
-  // NOTA (PR-6): mostrar "teasers" con título/precio de contenido AÚN bloqueado
-  // (para invitar a desbloquear) necesita una proyección teaser-safe aparte
-  // (metadata sin media, expuesta por una vista/policy propia). Es materia del
-  // PR de granting/entitlements — NO inventamos una tabla de teasers acá.
-  const { data: content } = await supabase
+  // Dos consultas complementarias:
+  //  1. `viewable` — el MISMO cliente cookie-scoped → la RLS `content_select`
+  //     devuelve SOLO lo que ESTE viewer puede ver (free_preview + lo que tenga
+  //     desbloqueado por entitlement/suscripción). Es el conjunto de ids a los
+  //     que SÍ se le entrega el media.
+  //  2. `teasers` — TODAS las piezas published+pass de la creadora vía
+  //     service-role (metadata SEGURA, NUNCA `media_ref`). Incluye las que el
+  //     fan aún NO desbloqueó, para mostrarles el teaser (título + precio +
+  //     botón). Una tarjeta bloqueada NUNCA apunta al endpoint de media.
+  const { data: { user: viewer } } = await supabase.auth.getUser()
+
+  const admin = getSupabaseAdmin()
+  const teasers = await listCreatorTeasers(admin, profile.id)
+
+  const { data: viewable } = await supabase
     .from('content')
-    .select('id, title, caption, media_type, visibility, required_tier, ppv_price_credits, created_at')
+    .select('id')
     .eq('creator_id', profile.id)
     .eq('status', 'published')
     .eq('csam_status', 'pass')
-    .order('created_at', { ascending: false })
+  const viewableIds = new Set((viewable ?? []).map((c) => c.id as string))
+
+  // Oferta de suscripción de la creadora (precio único MVP). NULL/0 ⇒ no ofrece.
+  const { data: creatorRow } = await admin
+    .from('creators')
+    .select('sub_price_foguitos')
+    .eq('user_id', profile.id)
+    .maybeSingle<{ sub_price_foguitos: number | null }>()
+  const subPrice = creatorRow?.sub_price_foguitos ?? null
+  const offersSubs = typeof subPrice === 'number' && subPrice > 0
+
+  // Saldo de foguitos del viewer (SUM(credit)−SUM(debit) de SUS filas del
+  // ledger, vía el cliente cookie-scoped/RLS). Sin sesión ⇒ no se muestra.
+  const balance = viewer ? await getFoguitoBalance(supabase, viewer.id) : null
+
+  // El viewer no puede suscribirse a sí misma (la creadora de este perfil).
+  const isOwnProfile = viewer?.id === profile.id
 
   const avatarRaw = posts?.[0]?.image_urls?.[0] || null
   const avatar    = avatarRaw ? getWatermarkedImageUrl(avatarRaw) : null
@@ -182,6 +209,27 @@ export default async function PublicProfilePage({
             </p>
           )}
 
+          {(balance !== null || (offersSubs && !isOwnProfile)) && (
+            <div className="pf-fade" style={{
+              display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap',
+              marginBottom: '32px', animationDelay: '.22s',
+            }}>
+              {balance !== null && (
+                <span style={{
+                  fontFamily: "'Switzer','Inter','Helvetica Neue',Arial,sans-serif",
+                  fontSize: '9px', fontWeight: 400, letterSpacing: '.16em',
+                  textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)',
+                  border: '1px solid rgba(37, 99, 235,0.18)', padding: '9px 14px', borderRadius: '2px',
+                }}>
+                  {balance.toLocaleString()} foguitos
+                </span>
+              )}
+              {offersSubs && !isOwnProfile && subPrice !== null && (
+                <SubscribeButton creatorId={profile.id} priceLabel={`${subPrice.toLocaleString()} foguitos`} />
+              )}
+            </div>
+          )}
+
           <div className="pf-fade" style={{
             height: '1px', marginBottom: '32px', animationDelay: '.25s',
             background: 'linear-gradient(90deg, transparent, rgba(37, 99, 235,0.3) 40%, rgba(37,99,235,0.4) 50%, rgba(37, 99, 235,0.3) 60%, transparent)',
@@ -245,7 +293,7 @@ export default async function PublicProfilePage({
             </div>
           )}
 
-          {content && content.length > 0 && (
+          {teasers.length > 0 && (
             <section style={{ marginTop: '48px' }}>
               <h2 className="pf-fade" style={{
                 fontFamily: "'Switzer','Inter','Helvetica Neue',Arial,sans-serif",
@@ -260,42 +308,63 @@ export default async function PublicProfilePage({
                 display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
                 gap: '12px', animationDelay: '.4s',
               }}>
-                {content.map((c) => {
+                {teasers.map((c) => {
+                  // ¿El viewer YA puede ver esta pieza? La RLS lo decidió en la
+                  // consulta `viewable` — sólo esos ids reciben el media.
+                  const unlocked = viewableIds.has(c.id)
                   // El binario se entrega SIEMPRE por el endpoint gateado (auth +
-                  // age-gate + entitlement + marca de agua). Nunca se referencia
-                  // el bucket privado ni una URL firmada cruda desde el cliente.
+                  // age-gate + entitlement + marca de agua). Una tarjeta BLOQUEADA
+                  // NUNCA apunta al endpoint de media.
                   const mediaUrl = `/api/content/${c.id}/media`
-                  const priceNote =
+                  const priceLabel =
                     c.visibility === 'ppv' && c.ppv_price_credits
                       ? `${c.ppv_price_credits} foguitos`
-                      : c.visibility === 'tier' && c.required_tier
-                        ? c.required_tier
-                        : 'preview'
+                      : 'Suscripción'
                   return (
                     <div key={c.id} className="pf-card" style={{ overflow: 'hidden' }}>
                       <div style={{ aspectRatio: '3/4', background: 'var(--v-bg-card)', position: 'relative' }}>
-                        {c.media_type === 'video' ? (
-                          <video
-                            controls
-                            preload="metadata"
-                            src={mediaUrl}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        ) : c.media_type === 'audio' ? (
-                          <div style={{
-                            width: '100%', height: '100%', display: 'flex',
-                            alignItems: 'center', justifyContent: 'center', padding: '12px',
-                          }}>
-                            <audio controls preload="metadata" src={mediaUrl} style={{ width: '100%' }} />
-                          </div>
+                        {unlocked ? (
+                          c.media_type === 'video' ? (
+                            <video
+                              controls
+                              preload="metadata"
+                              src={mediaUrl}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          ) : c.media_type === 'audio' ? (
+                            <div style={{
+                              width: '100%', height: '100%', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center', padding: '12px',
+                            }}>
+                              <audio controls preload="metadata" src={mediaUrl} style={{ width: '100%' }} />
+                            </div>
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={mediaUrl}
+                              alt={c.title ?? 'Contenido'}
+                              loading="lazy"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          )
                         ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={mediaUrl}
-                            alt={c.title ?? 'Contenido'}
-                            loading="lazy"
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
+                          // Placeholder BLOQUEADO — nunca el media. Sólo un candado.
+                          <div style={{
+                            width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', justifyContent: 'center', gap: '8px',
+                            color: 'rgba(255,255,255,0.35)',
+                          }}>
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" strokeWidth="1.4" />
+                              <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                            </svg>
+                            <span style={{
+                              fontFamily: "'Switzer','Inter','Helvetica Neue',Arial,sans-serif",
+                              fontSize: '7px', fontWeight: 400, letterSpacing: '.2em', textTransform: 'uppercase',
+                            }}>
+                              Bloqueado
+                            </span>
+                          </div>
                         )}
                       </div>
                       <div style={{ padding: '10px 12px' }}>
@@ -309,9 +378,19 @@ export default async function PublicProfilePage({
                           fontFamily: "'Switzer','Inter','Helvetica Neue',Arial,sans-serif",
                           fontSize: '8px', fontWeight: 400, letterSpacing: '.14em',
                           textTransform: 'uppercase', color: 'var(--v-accent)',
+                          marginBottom: unlocked ? 0 : '10px',
                         }}>
-                          {priceNote}
+                          {unlocked ? 'Desbloqueado' : priceLabel}
                         </p>
+                        {/* Tarjeta bloqueada → botón de desbloqueo/suscripción.
+                            PPV: compra por-pieza. tier: suscripción a la creadora. */}
+                        {!unlocked && !isOwnProfile && (
+                          c.visibility === 'ppv' && c.ppv_price_credits ? (
+                            <ContentUnlockButton contentId={c.id} priceLabel={`${c.ppv_price_credits} foguitos`} />
+                          ) : offersSubs && subPrice !== null ? (
+                            <SubscribeButton creatorId={profile.id} priceLabel={`${subPrice.toLocaleString()} foguitos`} />
+                          ) : null
+                        )}
                       </div>
                     </div>
                   )
