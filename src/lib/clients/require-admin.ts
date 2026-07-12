@@ -53,6 +53,12 @@ export type RequireAdminOptions = {
    *  `totp_*` cols are missing (schema lag), mirroring the middleware, so this
    *  can never lock an admin out. Only bites once the admin has 2FA enabled. */
   requireFreshTotp?: boolean
+  /** REQUIRE that the admin has TOTP ENROLLED (fail-CLOSED, unlike
+   *  `requireFreshTotp`). Reserve for the highest-privilege surfaces (money-out)
+   *  where a second factor must be mandatory: an admin who never enrolled 2FA
+   *  (or a `totp_*` schema lag) is REJECTED with `totp_enrollment_required`
+   *  instead of let through. Pair with `requireFreshTotp` for enrolled + recent. */
+  requireTotpEnrolled?: boolean
 }
 
 export async function requireAdmin(
@@ -118,12 +124,24 @@ export async function requireAdmin(
   //    same as the middleware). A stale (or never-verified) 2FA session is
   //    rejected with a machine-readable code so the client can bounce to
   //    /auth/totp.
-  if (options?.requireFreshTotp) {
+  if (options?.requireFreshTotp || options?.requireTotpEnrolled) {
     const { data: totpProf, error: totpErr } = await admin
       .from('profiles')
       .select('totp_enabled, last_totp_verified_at')
       .eq('id', userId)
       .single()
+
+    // Fail-CLOSED enrollment gate (money-out): sin 2FA enrolada (o cols totp_*
+    // ausentes) se RECHAZA — un segundo factor es obligatorio acá, no opt-out.
+    if (options?.requireTotpEnrolled && (totpErr || !totpProf?.totp_enabled)) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: 'Se requiere 2FA (TOTP) habilitado para esta operación', code: 'totp_enrollment_required' },
+          { status: 403 },
+        ),
+      }
+    }
 
     if (!totpErr && totpProf?.totp_enabled) {
       const lastVerified = totpProf.last_totp_verified_at
