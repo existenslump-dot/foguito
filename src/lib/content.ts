@@ -180,6 +180,58 @@ export async function listContentForCreator(
 }
 
 /**
+ * Teaser PÚBLICO de una pieza publicada — metadata SEGURA para descubrir
+ * contenido bloqueado sin filtrar el media (PR-6). NUNCA incluye `media_ref`.
+ *
+ * La página de perfil usa esto (vía service-role) para listar TODAS las piezas
+ * published+pass de la creadora, incluidas las que el fan aún NO desbloqueó, y
+ * mostrar un teaser (título + precio + botón) — mientras que la RLS decide qué
+ * media se entrega. Una tarjeta bloqueada NUNCA apunta al endpoint de media.
+ */
+export type ContentTeaser = {
+  id: string
+  creator_id: string
+  title: string | null
+  caption: string | null
+  media_type: MediaType | null
+  visibility: Visibility
+  required_tier: string | null
+  ppv_price_credits: number | null
+  published_at: string | null
+}
+
+const TEASER_COLS =
+  'id, creator_id, title, caption, media_type, visibility, required_tier, ppv_price_credits, published_at'
+
+/**
+ * Lista los teasers (metadata SEGURA, sin media) de TODAS las piezas
+ * published + csam-pass de una creadora, para el descubrimiento en el perfil.
+ *
+ * ┌───────────────────────────────────────────────────────────────────────────┐
+ * │ INVARIANTE: NUNCA se selecciona `media_ref`. Esto lista piezas que el fan   │
+ * │ tal vez NO puede ver (bloqueadas) — el media jamás se filtra: la entrega    │
+ * │ sigue pasando por la RLS + el endpoint gateado. Sólo metadata + precio.     │
+ * └───────────────────────────────────────────────────────────────────────────┘
+ *
+ * Corre con el service-role `admin` (necesita ver piezas que la RLS del fan
+ * ocultaría). Orden: más nuevas primero.
+ */
+export async function listCreatorTeasers(
+  admin: SupabaseClient,
+  creatorId: string,
+): Promise<ContentTeaser[]> {
+  const { data, error } = await admin
+    .from('content')
+    .select(TEASER_COLS)
+    .eq('creator_id', creatorId)
+    .eq('status', 'published')
+    .eq('csam_status', 'pass')
+    .order('published_at', { ascending: false, nullsFirst: false })
+  if (error || !data) return []
+  return data as ContentTeaser[]
+}
+
+/**
  * List content in the given moderation statuses (the admin review queue).
  * SAFE fields only — the private media_ref is NOT returned here; the signed
  * URL is minted per-id in the admin route. MUST be admin/service-role.
