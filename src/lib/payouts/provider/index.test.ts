@@ -58,36 +58,43 @@ describe('payouts/provider — sanciones', () => {
     vi.unstubAllEnvs()
   })
 
-  it('stub dev: default clear con ref determinístico', async () => {
-    const r = await new StubSanctionsProvider().screen({ creatorId: 'creator-abc' })
+  it('stub dev: default clear con ref determinístico (incluye subjectType)', async () => {
+    const r = await new StubSanctionsProvider().screen({ subjectId: 'creator-abc', subjectType: 'creator' })
     expect(r.status).toBe('clear')
-    expect(r.ref).toBe('STUB-SANCTIONS-creator-abc')
+    expect(r.ref).toBe('STUB-SANCTIONS-creator-creator-abc')
   })
 
-  it('stub dev: sentinels → hit / review', async () => {
-    const hit = await new StubSanctionsProvider().screen({ creatorId: 'x-sanctions-hit-1' })
+  it('stub dev: el ref refleja la superficie (consumer / payout)', async () => {
+    const consumer = await new StubSanctionsProvider().screen({ subjectId: 'fan-1', subjectType: 'consumer' })
+    expect(consumer.ref).toBe('STUB-SANCTIONS-consumer-fan-1')
+    const payout = await new StubSanctionsProvider().screen({ subjectId: 'benef-1', subjectType: 'payout' })
+    expect(payout.ref).toBe('STUB-SANCTIONS-payout-benef-1')
+  })
+
+  it('stub dev: sentinels en subjectId → hit / review', async () => {
+    const hit = await new StubSanctionsProvider().screen({ subjectId: 'x-sanctions-hit-1', subjectType: 'consumer' })
     expect(hit.status).toBe('hit')
-    const rev = await new StubSanctionsProvider().screen({ creatorId: 'x-sanctions-review-1' })
+    const rev = await new StubSanctionsProvider().screen({ subjectId: 'x-sanctions-review-1', subjectType: 'creator' })
     expect(rev.status).toBe('review')
   })
 
   it('stub: FAIL-CLOSED en producción — SIEMPRE review (jamás auto-clear)', async () => {
     vi.stubEnv('VERCEL_ENV', 'production')
-    const r = await new StubSanctionsProvider().screen({ creatorId: 'creator-abc' })
+    const r = await new StubSanctionsProvider().screen({ subjectId: 'creator-abc', subjectType: 'creator' })
     expect(r.status).toBe('review')
-    expect(r.ref).toBe('STUB-SANCTIONS-creator-abc')
+    expect(r.ref).toBe('STUB-SANCTIONS-creator-creator-abc')
   })
 
   it('stub: en prod ni siquiera un id "limpio" clarea', async () => {
     vi.stubEnv('NODE_ENV', 'production')
-    const r = await new StubSanctionsProvider().screen({ creatorId: 'totally-clean-id' })
+    const r = await new StubSanctionsProvider().screen({ subjectId: 'totally-clean-id', subjectType: 'consumer' })
     expect(r.status).not.toBe('clear')
   })
 
   it('real: esqueleto fail-closed — screen tira (not implemented)', async () => {
-    await expect(new VendorSanctionsProvider().screen({ creatorId: 'creator-abc' })).rejects.toThrow(
-      /not implemented/,
-    )
+    await expect(
+      new VendorSanctionsProvider().screen({ subjectId: 'creator-abc', subjectType: 'creator' }),
+    ).rejects.toThrow(/not implemented/)
   })
 
   it('factory: stub sin SANCTIONS_API_KEY, real con la key', () => {

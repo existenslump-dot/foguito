@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/clients/supabase-admin'
 import { requireAdmin } from '@/lib/clients/require-admin'
-import { getSanctionsProvider } from '@/lib/payouts/provider'
+import { screenSubject } from '@/lib/aml'
 import { recordAudit } from '@/lib/audit'
 
 export const runtime = 'nodejs'
@@ -71,12 +71,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: 'creator_not_found' }, { status: 404 })
   }
 
-  // Screening de sanciones. Un throw del vendor real ⇒ 502 (no se toca la columna).
+  // Screening de sanciones vía el motor AML: screenea + deja el trail append-only en
+  // `sanctions_screenings` + estampa `creators.sanctions_status`/`sanctions_screened_at`
+  // (service-role, pasa el guard privilegiado). Un throw del vendor real (o del write
+  // del status) ⇒ 502 (fail-closed: no se declara nada 'clear' a ciegas).
   let screenStatus: 'clear' | 'review' | 'hit'
   let screenRef: string
   try {
-    const screen = await getSanctionsProvider().screen({
-      creatorId: id,
+    const screen = await screenSubject(admin, {
+      subjectType: 'creator',
+      subjectId: id,
       legalName: creator.pseudonym ?? null,
       country: creator.country ?? null,
     })
@@ -87,15 +91,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: 'sanctions_unavailable' }, { status: 502 })
   }
 
-  // Escribir el veredicto (service-role pasa el guard privilegiado). El screen.status
-  // mapea 1:1 a sanctions_status.
-  const patch: Record<string, unknown> = { sanctions_status: screenStatus }
-  if (payoutKyc) patch.payout_kyc_status = payoutKyc
-
-  const { error: upErr } = await admin.from('creators').update(patch).eq('user_id', id)
-  if (upErr) {
-    console.error('[api/admin/creators/screen] update error', upErr)
-    return NextResponse.json({ error: 'error' }, { status: 500 })
+  // El payout-KYC es una decisión del admin ORTOGONAL al screening → update aparte
+  // (screenSubject ya escribió sanctions_status). Sólo se toca si vino en el body.
+  if (payoutKyc) {
+    const { error: upErr } = await admin
+      .from('creators')
+      .update({ payout_kyc_status: payoutKyc })
+      .eq('user_id', id)
+    if (upErr) {
+      console.error('[api/admin/creators/screen] payout_kyc update error', upErr)
+      return NextResponse.json({ error: 'error' }, { status: 500 })
+    }
   }
 
   void recordAudit({
