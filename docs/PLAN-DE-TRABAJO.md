@@ -1,5 +1,11 @@
 # Foguito · Plan de trabajo
 
+> ✅ **ESTADO (2026-07-13): roadmap PR-0 → PR-10 COMPLETO y mergeado a `main`.** Producto en
+> producción (`https://foguito.com`) pero **inerte** hasta contratar los vendors de §6 (cada
+> integración es fail-closed). Estado operativo + deploy → `.claude/HANDOFF.md`; decisiones →
+> `docs/adr/`; bitácora → `docs/logbook.md`. Los ● de aceptación de abajo quedan cumplidos como
+> test/flujo. Lo que resta es **contratar vendors + acción legal/fiscal**, no código.
+
 > Documento operativo. Traduce los tres briefs (INSTRUCCIONES-GENERALES, design-system,
 > estructura-riel) a un plan de construcción ejecutable, partiendo de **clonar el engine
 > `marketplace-starter`** (ver §Base). Regla base heredada: **si algo acá contradice los
