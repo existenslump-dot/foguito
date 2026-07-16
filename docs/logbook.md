@@ -5,6 +5,26 @@ estado operativo en `.claude/HANDOFF.md`.
 
 ---
 
+## 2026-07-16 — Plan de migración de media Cloudinary → Bunny (porteo desde velora)
+
+- **Contexto:** velora ejecutó la migración de media a Bunny de punta a punta (infra viva, 166
+  assets migrados y verificados, PR-A fundaciones + PR-B upload mergeados). Se portó el **plan +
+  aprendizajes reales** a foguito para replicarlo casi mecánicamente.
+- **Docs nuevos/actualizados:**
+  - `docs/MIGRACION-MEDIA-BUNNY.md` → **§5 "Aprendizajes de la ejecución REAL en velora"**:
+    receta de consola Bunny, gotchas de env (`BUNNY_STORAGE_HOST` sin `https://`, tres keys
+    distintas, sacar `NODE_TLS_REJECT_UNAUTHORIZED=0`, nunca keys en el chat), backfill con
+    worktree + `tsx --env-file` (no dotenv-cli), manejo de refs muertas (404) por SQL, checklist
+    de verificación en vivo, migración por MCP con versión del ledger, y PR-B prod-safe (sharp a
+    prod deps, alias `server-only` en vitest, watermark en runtime de Vercel).
+  - `docs/adr/0006-media-storage-migration-cloudinary-bunny.md` (nuevo) — decisión de porteo con
+    los deltas de foguito (dos planos, token off/on, CSAM gate primero, TUS de Stream).
+- **Decisión de secuencia:** **paso 0 (portar el custom loader de velora #441) es ejecutable YA**
+  — cierra la exposición AUP de `/_next/image` de Vercel sin esperar a Bunny. El resto (PR-A→cierre)
+  conviene diferirlo hasta que velora complete su **PR-C (cutover)** y absorber los aprendizajes.
+- **Recordatorio:** el contenido PAGO ya está fuera de Cloudinary (bucket Supabase + watermark
+  sharp por fan) — la migración solo cubre el plano legacy público.
+
 ## 2026-07-13 — Deploy a producción + cierre de docs
 
 - **Deploy inicial a Vercel (Pro)** con lo mínimo funcional: Supabase + dominio + SSL + Turnstile +

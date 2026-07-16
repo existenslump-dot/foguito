@@ -12,3 +12,4 @@ Formato: **Status · Context · Decision · Consequences**.
 | [0003](0003-takedown-via-content-status.md) | Takedown se propaga vía `content.status='removed'` (sin tabla `takedowns`) | Accepted |
 | [0004](0004-deployment-topology.md) | Deploy: apex canónico + Cloudflare DNS-only + Vercel Pro | Accepted |
 | [0005](0005-money-in-mor-nonredeemable.md) | Money-in merchant-of-record, PAN cero, foguitos no redimibles | Accepted |
+| [0006](0006-media-storage-migration-cloudinary-bunny.md) | Migración de media Cloudinary → Bunny (porteo desde velora ADR-0005) | Accepted (ejecución diferida) |

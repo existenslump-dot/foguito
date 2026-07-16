@@ -74,3 +74,12 @@ Al cablear un vendor: cargás su API key (Production+Sensitive), y — si aplica
    habilitar cobros reales.
 4. Email: verificar dominio en Resend + DMARC/SPF/DKIM en Cloudflare (patrón en velora-plus
    `docs/security/email-dmarc.md`).
+5. **Media → Bunny (plan portado, ADR-0006 + `docs/MIGRACION-MEDIA-BUNNY.md` §5 con la receta real
+   de velora):** el **paso 0** (portar el custom loader `image-loader.ts` de velora #441 + guard
+   ESLint) es ejecutable YA y cierra la exposición AUP de `/_next/image` de Vercel para el plano
+   legacy público, sin esperar a Bunny. El resto (registro `media_assets` → upload fail-closed →
+   cutover → cierre) conviene diferirlo hasta que velora complete su PR-C (cutover) y absorber los
+   aprendizajes. El contenido PAGO NO se toca (ya está fuera de Cloudinary). ⚠️ al ejecutar:
+   `BUNNY_STORAGE_HOST` sin `https://`, backfill con worktree + `tsx --env-file`, refs 404 se
+   limpian por SQL antes del cutover, `sharp` a prod deps, archivo de migración con la versión del
+   ledger.
