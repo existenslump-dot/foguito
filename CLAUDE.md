@@ -90,6 +90,7 @@ levanta igual, el stub jamás clarea en prod). Sistemas construidos sobre el eng
 
 - Images uploaded via Cloudinary; cloud name and upload preset come from env (`NEXT_PUBLIC_CLOUDINARY_CLOUD`, `NEXT_PUBLIC_CLOUDINARY_PRESET`) — see `src/config/marketplace.config.ts`
 - `next.config.ts` allows remote images from `res.cloudinary.com`
+- **Migración de media a Bunny planificada — ver `docs/MIGRACION-MEDIA-BUNNY.md` (§5 = receta real de la ejecución en velora) + ADR-0006 antes de tocar media.** Claves: el contenido PAGO ya está fuera de Cloudinary (bucket privado Supabase + watermark sharp por fan — no lo toca la migración); lo urgente es el plano legacy público, que sigue en Cloudinary **y pasa por el optimizador default de Vercel (`remotePatterns` → `/_next/image`), exposición AUP con media adulta** — el paso 0 del plan (portar el custom loader de velora #441) se puede hacer YA, sin esperar a Bunny. El diseño de referencia y el runbook viven en `velora-plus/docs/media/migracion-cloudinary-bunny.md`
 
 ### Styling
 
