@@ -127,6 +127,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const requestHeaders = await headers();
+  const maintenanceMode = requestHeaders.get("x-foguito-maintenance") === "1";
+
   return (
     <html lang="es" className="light" translate="no">
       <head>
