@@ -86,7 +86,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Temporary branded maintenance screen; API routes and static assets remain available.
-  const isStaticAsset = /\\.[a-zA-Z0-9]+$/.test(pathname) || pathname.startsWith('/_next/')
+  const isStaticAsset = /\.[a-zA-Z0-9]+$/.test(pathname) || pathname.startsWith('/_next/')
   if (!pathname.startsWith('/api/') && !isStaticAsset) {
     const maintenanceHeaders = new Headers(request.headers)
     maintenanceHeaders.set('x-foguito-maintenance', '1')
