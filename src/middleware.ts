@@ -84,6 +84,19 @@ function findRateRule(pathname: string) {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+
+  // Temporary branded maintenance screen; API routes and static assets remain available.
+  const isStaticAsset = /\\.[a-zA-Z0-9]+$/.test(pathname) || pathname.startsWith('/_next/')
+  if (!pathname.startsWith('/api/') && !isStaticAsset) {
+    const maintenanceHeaders = new Headers(request.headers)
+    maintenanceHeaders.set('x-foguito-maintenance', '1')
+    if (pathname !== '/') {
+      return NextResponse.rewrite(new URL('/', request.url), {
+        request: { headers: maintenanceHeaders },
+      })
+    }
+    return NextResponse.next({ request: { headers: maintenanceHeaders } })
+  }
   const userAgent = request.headers.get('user-agent') || ''
   const bot = isCrawler(userAgent)
 
