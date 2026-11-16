@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Cormorant_Garamond, Montserrat } from "next/font/google";
 import "./globals.css";
 import "flag-icons/css/flag-icons.min.css";
@@ -78,19 +79,19 @@ export const metadata: Metadata = {
   // Tab title. Pages can override via generateMetadata; the template wraps
   // their value. Replace with your own brand + value proposition.
   title: {
-    default: 'Marketplace — Find listings near you',
-    template: '%s | Marketplace',
+    default: 'Foguito — En construcción',
+    template: '%s | Foguito',
   },
   // Keep under ~155 chars so Google doesn't truncate in SERP.
   description:
-    'A marketplace to discover and contact verified listings. Replace this with your own description.',
+    'Foguito estará disponible pronto. Estamos trabajando para ti.',
   keywords: ['marketplace', 'listings', 'directory'],
   robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
   openGraph: {
     type:        'website',
     locale:      'es_AR',
-    siteName:    'Marketplace',
-    title:       'Marketplace',
+    siteName:    'Foguito',
+    title:       'Foguito — En construcción',
     description: 'A marketplace to discover and contact verified listings.',
     url:         'https://example.com',
     // Link-share preview is the code-generated src/app/opengraph-image.tsx.
@@ -98,7 +99,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card:        'summary_large_image',
-    title:       'Marketplace',
+    title:       'Foguito — En construcción',
     description: 'A marketplace to discover and contact verified listings.',
   },
   other: {
@@ -121,7 +122,7 @@ export const viewport = {
   colorScheme: 'light dark',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -140,6 +141,9 @@ export default function RootLayout({
           }}
         />
         <link rel="preconnect" href="https://api.fontshare.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
         <link
           rel="stylesheet"
           href="https://api.fontshare.com/v2/css?f[]=switzer@200,300,400,500,600,700,800&display=swap"
@@ -156,16 +160,17 @@ export default function RootLayout({
         translate="no"
         style={{ background: 'var(--v-bg-base)', color: 'var(--v-text-primary)' }}
       >
-        <ClientProviders>
-          <FloatingLangSelector />
-          <UserHeader />
-          {children}
-          <MarketplaceChat />
-          <PushPermission />
-          <IdleLogout />
-        </ClientProviders>
-        <Analytics />
-        <SpeedInsights />
+        {maintenanceMode ? children : (
+          <ClientProviders>
+            <FloatingLangSelector />
+            <UserHeader />
+            {children}
+            <MarketplaceChat />
+            <PushPermission />
+            <IdleLogout />
+          </ClientProviders>
+        )}
+        {!maintenanceMode && <><Analytics /><SpeedInsights /></>}
       </body>
     </html>
   );
